@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id            String    @id @default(cuid())
+  name          String?
+  phone         String    @unique
+  email         String?
+  businessName  String?
+  category      String?
+  city          String?
+  address       String?
+  website       String?
+  rating        Float?
+  reviewCount   Int?
+  source        String    @default("manual")   // ai_scraper | outscraper | manual | import
+  status        String    @default("new")       // new | contacted | interested | not_interested | closed
+  state         String?
+  googleMapsUrl String?
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  searchJobId   String?
+  searchJob     SearchJob? @relation(fields: [searchJobId], references: [id], onDelete: SetNull)
+
+  messages        Message[]
+  campaignLeads   CampaignLead[]
+
+  @@index([status])
+  @@index([source])
+  @@index([searchJobId])
+  @@index([createdAt])
+}
+
+model SearchJob {
+  id                 String    @id @default(cuid())
+  prompt             String
+  summary            String
+  category           String?
+  location           String?
+  requested          Int       @default(25)
+  found              Int       @default(0)
+  duplicates         Int       @default(0)
+  newLeads           Int       @default(0)
+  status             String    @default("COMPLETED") // QUEUED | RUNNING | COMPLETED | FAILED
+  createdAt          DateTime  @default(now())
+  completedAt        DateTime?
+
+  leads              Lead[]
+
+  @@index([createdAt])
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  status      String   @default("draft")   // draft | active | paused | completed
+  steps       String   @default("[]")      // JSON: [{day_offset, message}]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaignLeads CampaignLead[]
+  messages      Message[]
+}
+
+model CampaignLead {
+  id          String    @id @default(cuid())
+  campaignId  String
+  leadId      String
+  currentStep Int       @default(0)
+  nextSendAt  DateTime?
+  status      String    @default("active")  // active | paused | completed | opted_out | interested
+  enrolledAt  DateTime  @default(now())
+
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, leadId])
+  @@index([status, nextSendAt])
+  @@index([leadId])
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  leadId      String
+  campaignId  String?
+  direction   String                   // outbound | inbound
+  body        String
+  twilioSid   String?
+  status      String   @default("queued")  // queued | sent | delivered | failed
+  sentiment   String?                  // positive | negative | neutral | opted_out
+  isInterested Boolean?
+  aiReplied   Boolean  @default(false)
+  sentAt      DateTime @default(now())
+
+  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([twilioSid])
+  @@index([direction, status])
+  @@index([sentAt])
+}
+
+
+

@@ -1,0 +1,55 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* PlumbFlow Backgrounds */
+    --background: 38 35% 94%;
+    --foreground: 204 46% 16%;
+    --card: 39 40% 97%;
+    --card-foreground: 204 46% 16%;
+    --popover: 39 40% 97%;
+    --popover-foreground: 204 46% 16%;
+    
+    /* Primary (Teal) */
+    --primary: 174 54% 36%;
+    --primary-foreground: 39 40% 97%;
+    
+    /* Muted */
+    --muted: 37 24% 89%;
+    --muted-foreground: 205 18% 45%;
+    
+    /* Secondary (Sidebar dark teal mapped for generic use) */
+    --secondary: 204 47% 15%;
+    --secondary-foreground: 39 40% 96%;
+    
+    /* Accent / Hover */
+    --accent: 37 24% 89%;
+    --accent-foreground: 204 46% 16%;
+    
+    /* Destructive */
+    --destructive: 2 64% 48%;
+    --destructive-foreground: 39 40% 97%;
+    
+    /* Borders & Inputs */
+    --border: 35 22% 84%;
+    --input: 35 22% 82%;
+    --ring: 174 54% 39%;
+    
+    /* Base Radius */
+    --radius: 0.75rem; /* 12px */
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { 
+    @apply bg-background text-foreground font-sans antialiased; 
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.02'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+}
