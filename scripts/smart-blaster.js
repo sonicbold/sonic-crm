@@ -80,8 +80,9 @@ async function runCampaign(contacts, targetHours, messageTemplate) {
 // HOW TO USE THE SCRIPT
 // ==========================================
 
-// 1. Define your target duration in hours
-const TARGET_HOURS = 2; // e.g., Spread the blast over 2 hours
+// 1. Define your target duration in hours (Accepts command line argument, defaults to 2)
+const args = process.argv.slice(2);
+const TARGET_HOURS = args[0] ? parseFloat(args[0]) : 2;
 
 // 2. Define your message template
 const MESSAGE = "Hi {name}, Sonic CRM is running a special this month. Are you interested?";

@@ -1,0 +1,26 @@
+name: Run SMS Blast
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: 'Target Duration (Hours)'
+        required: true
+        default: '2'
+
+jobs:
+  blast:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Execute Smart Blaster
+        run: node scripts/smart-blaster.js ${{ github.event.inputs.hours }}
