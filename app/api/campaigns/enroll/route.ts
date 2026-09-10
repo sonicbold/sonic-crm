@@ -9,7 +9,7 @@ function getLocalHour(date: Date): number {
 }
 
 export async function POST(req: NextRequest) {
-  const { campaignId, leadIds, isDrip = true } = await req.json();
+  const { campaignId, leadIds, isDrip = true, targetHours = 6 } = await req.json();
   if (!campaignId || !leadIds?.length) return NextResponse.json({ error: "campaignId and leadIds required" }, { status: 400 });
 
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
@@ -62,11 +62,20 @@ export async function POST(req: NextRequest) {
     enrolled++;
 
     if (isDrip) {
-      // Advance pointer by random 45 to 90 seconds
-      const randomSeconds = Math.floor(Math.random() * (90 - 45 + 1)) + 45;
-      timePointer.setSeconds(timePointer.getSeconds() + randomSeconds);
+      // 1. Calculate Base Delay exactly as requested
+      const totalContacts = leadIds.length;
+      const baseDelaySeconds = (targetHours * 3600) / totalContacts;
+      
+      // 2. Random Jitter (70% to 130%), minimum 2 seconds
+      let minDelay = baseDelaySeconds * 0.7;
+      let maxDelay = baseDelaySeconds * 1.3;
+      minDelay = Math.max(2, minDelay);
+      maxDelay = Math.max(2, maxDelay);
+      const jitterDelaySeconds = minDelay + Math.random() * (maxDelay - minDelay);
 
-      // If pointer crosses 5 PM (17:00), push to 9 AM the next day
+      timePointer.setSeconds(timePointer.getSeconds() + jitterDelaySeconds);
+
+      // 3. Ensure we stay in 9 AM - 5 PM bounds for natural sending
       if (getLocalHour(timePointer) >= 17) {
         timePointer.setDate(timePointer.getDate() + 1);
         timePointer.setHours(9, 0, 0, 0);

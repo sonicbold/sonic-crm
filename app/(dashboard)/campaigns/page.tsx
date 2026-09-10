@@ -64,10 +64,18 @@ export default function CampaignsPage() {
   async function enrollLeads() {
     if (!enrollOpen || !selectedLeads.size) return;
     setEnrolling(true);
+    
+    // Read the target hours from the DOM if Drip is enabled
+    let targetHours = 6;
+    if (isDrip) {
+      const hoursEl = document.getElementById('target-hours') as HTMLInputElement;
+      if (hoursEl && hoursEl.value) targetHours = parseFloat(hoursEl.value);
+    }
+
     const res = await fetch("/api/campaigns/enroll", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaignId: enrollOpen.id, leadIds: Array.from(selectedLeads), isDrip }),
+      body: JSON.stringify({ campaignId: enrollOpen.id, leadIds: Array.from(selectedLeads), isDrip, targetHours }),
     });
     const data = await res.json();
     setEnrolling(false); setEnrollOpen(null);
@@ -171,10 +179,28 @@ export default function CampaignsPage() {
             ))}
             <div className="mt-4 pt-4 border-t border-border">
               <label className="text-sm font-heading font-semibold">Human-Like Throttling</label>
-              <p className="text-xs font-sans text-muted-foreground mb-3 mt-1">Enforces a strict 9 AM - 7 PM sending window. Randomizes gap between every single message.</p>
-              <div className="flex items-center gap-3 bg-muted/40 p-3 rounded-xl border border-border">
-                <input type="checkbox" checked={isDrip} onChange={e => setIsDrip(e.target.checked)} className="h-4 w-4 rounded border-border" />
-                <span className="text-sm font-sans font-medium text-foreground">Enable randomized 18–42 minute delay</span>
+              <p className="text-xs font-sans text-muted-foreground mb-3 mt-1">Automatically spaces out messages with organic jitter to avoid carrier filtering.</p>
+              
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 bg-muted/40 p-3 rounded-xl border border-border">
+                  <input type="checkbox" checked={isDrip} onChange={e => setIsDrip(e.target.checked)} className="h-4 w-4 rounded border-border" />
+                  <span className="text-sm font-sans font-medium text-foreground">Enable Organic Spacing</span>
+                </div>
+                
+                {isDrip && (
+                  <div className="pl-8 flex items-center gap-3">
+                    <span className="text-sm text-muted-foreground">Target Duration:</span>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="72"
+                      defaultValue="6"
+                      id="target-hours"
+                      className="w-20 h-8 rounded-lg border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:border-copper" 
+                    />
+                    <span className="text-sm text-muted-foreground">Hours</span>
+                  </div>
+                )}
               </div>
             </div>
             {leads.length === 0 && <p className="text-center text-muted-foreground text-sm font-sans py-8">No entirely fresh leads available. Leads already contacted are hidden.</p>}

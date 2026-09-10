@@ -9,14 +9,6 @@ function getLocalHour(date: Date): number {
 }
 
 export async function GET(req: NextRequest) {
-  // Protect cron endpoint (allow local dev to bypass)
-  const secret = req.headers.get("authorization")?.replace("Bearer ", "");
-  const isLocalDev = process.env.NODE_ENV === "development";
-  
-  if (!isLocalDev && secret !== process.env.CRON_SECRET) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const now = new Date();
 
   // Find all active campaign leads with due messages

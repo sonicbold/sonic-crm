@@ -1,17 +1,15 @@
-﻿"use client";
+"use client";
 import { useEffect } from "react";
 
 export function LocalCron() {
   useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
-    
-    // In local development, Vercel isn't here to trigger the cron job.
-    // This component acts as a background runner while the dashboard is open.
+    // This component acts as a continuous background runner while the dashboard is open.
+    // By keeping the CRM tab open, the browser itself acts as the organic SMS blaster server!
     const runCron = () => {
       fetch("/api/cron/drip").catch(console.error);
     };
 
-    // Run every 10 seconds locally to process the queue quickly for testing
+    // Run frequently (every 10 seconds) to ensure randomized messages go out exactly on time
     const interval = setInterval(runCron, 10000);
     return () => clearInterval(interval);
   }, []);
