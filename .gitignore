@@ -4,3 +4,5 @@ node_modules/
 .next/
 prisma/dev.db
 prisma/dev.db-journal
+data/secrets.json
+data/exports/

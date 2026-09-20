@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model Lead {
@@ -25,6 +24,10 @@ model Lead {
   state         String?
   googleMapsUrl String?
   notes         String?
+  replied       Boolean   @default(false)
+  archived      Boolean   @default(false)
+  archivedAt    DateTime?
+  lastInboundAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -33,11 +36,15 @@ model Lead {
 
   messages        Message[]
   campaignLeads   CampaignLead[]
+  notifications   Notification[]
+  suggestedReplies SuggestedReply[]
 
   @@index([status])
   @@index([source])
   @@index([searchJobId])
   @@index([createdAt])
+  @@index([archived])
+  @@index([replied])
 }
 
 model SearchJob {
@@ -63,8 +70,9 @@ model Campaign {
   id          String   @id @default(cuid())
   name        String
   description String?
-  status      String   @default("draft")   // draft | active | paused | completed
-  steps       String   @default("[]")      // JSON: [{day_offset, message}]
+  status      String   @default("draft")   // draft | active | paused | completed | stopped
+  steps       String   @default("[]")      // JSON: [{ message }] — one SMS per lead
+  targetCount Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -78,7 +86,9 @@ model CampaignLead {
   leadId      String
   currentStep Int       @default(0)
   nextSendAt  DateTime?
-  status      String    @default("active")  // active | paused | completed | opted_out | interested
+  sentAt      DateTime?
+  lastError   String?
+  status      String    @default("queued")  // queued | scheduled | sent | failed | cancelled | opted_out
   enrolledAt  DateTime  @default(now())
 
   campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
@@ -95,7 +105,7 @@ model Message {
   campaignId  String?
   direction   String                   // outbound | inbound
   body        String
-  twilioSid   String?
+  twilioSid     String?                  // Telnyx message id
   status      String   @default("queued")  // queued | sent | delivered | failed
   sentiment   String?                  // positive | negative | neutral | opted_out
   isInterested Boolean?
@@ -109,6 +119,37 @@ model Message {
   @@index([twilioSid])
   @@index([direction, status])
   @@index([sentAt])
+}
+
+model AppSetting {
+  key   String @id
+  value String
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String   @default("info") // interest | declined | system
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@index([read, createdAt])
+}
+
+model SuggestedReply {
+  id               String   @id @default(cuid())
+  leadId           String
+  inboundMessageId String?
+  body             String
+  status           String   @default("pending") // pending | sent | dismissed
+  createdAt        DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, status])
 }
 
 

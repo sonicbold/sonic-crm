@@ -2,7 +2,7 @@ const fs = require('fs');
 
 /**
  * Placeholder function for sending SMS.
- * You can plug in Twilio, GoHighLevel, or any SMS API here.
+ * The app sends through Telnyx (`lib/telnyx.ts`). This script is unused by the UI.
  */
 async function send_sms(phone, message) {
   // Example of how you would plug in an API:

@@ -1,46 +1,45 @@
-# FlowBoost — Agentic Plumber CRM
+# Sonic CRM — Agentic Plumber CRM
 
-A specialized, minimal CRM for plumbing marketing agencies. Scrape leads, run SMS drip campaigns, and let an AI agent (Jordan) auto-reply and qualify leads 24/7.
+A specialized CRM for plumbing marketing agencies. Scrape leads, send a single Telnyx SMS blast, and let an AI agent (Jordan) auto-reply and qualify leads.
 
-## Setup Instructions
+## Setup
 
-1. **Install Dependencies**
+1. **Install dependencies**
    ```bash
    npm install
    ```
 
-2. **Initialize Database**
-   This uses SQLite (zero-config).
+2. **Initialize database**
    ```bash
    npx prisma db push
    ```
 
-3. **Configure Environment Variables**
-   Copy `.env.local.example` to `.env.local`:
-   ```bash
-   cp .env.local.example .env.local
-   ```
-   Fill in your:
-   - Twilio credentials (for SMS)
-   - Outscraper API key (for Google Maps scraping)
-   - OpenAI API key (for AI agent)
-   - Cron secret (any random string)
+3. **Configure environment**
+   Copy `.env.local.example` to `.env.local` and fill in:
+   - Telnyx API key and from-number
+   - Outscraper API key (Google Maps scraping)
+   - OpenAI API key (AI agent)
+   - `NEXT_PUBLIC_APP_URL` (public URL for Telnyx webhooks)
 
-4. **Run the Development Server**
+4. **Run**
    ```bash
    npm run dev
    ```
 
-## Webhooks (Local Dev)
-To receive inbound SMS replies and Outscraper results locally, you need a public URL (e.g., via ngrok):
-```bash
-ngrok http 3000
-```
-Update your Twilio phone number webhook to: `https://<ngrok-url>/api/sms/webhook`
-Update `NEXT_PUBLIC_APP_URL` in `.env.local` to your ngrok URL.
+   Or with Docker:
+   ```bash
+   docker compose up --build
+   ```
 
-## Cron Jobs (Drip Campaigns)
-The drip campaigns run automatically via Vercel Cron. For local testing, you can trigger the cron manually:
-```bash
-curl -H "Authorization: Bearer YOUR_CRON_SECRET" http://localhost:3000/api/cron/drip
-```
+## Telnyx webhooks
+
+Point your Telnyx Messaging Profile webhook to:
+
+- Inbound + events: `https://<your-host>/api/sms/webhook`
+- Delivery status (also set per-message): `https://<your-host>/api/sms/status`
+
+Use a public URL (ngrok in local dev). Set `TELNYX_PUBLIC_KEY` so production webhooks are signature-checked.
+
+## Campaigns
+
+Campaigns are a **single SMS**, sent immediately when you enroll leads. There is no drip / follow-up sequence scheduler.
