@@ -9,17 +9,18 @@ A specialized CRM for plumbing marketing agencies. Scrape leads, send a single T
    npm install
    ```
 
-2. **Initialize database**
-   ```bash
-   npx prisma db push
-   ```
-
-3. **Configure environment**
+2. **Configure environment**
    Copy `.env.local.example` to `.env.local` and fill in:
+   - `DATABASE_URL` and `DIRECT_URL` (Supabase pooler URIs)
    - Telnyx API key and from-number
    - Outscraper API key (Google Maps scraping)
    - OpenAI API key (AI agent)
    - `NEXT_PUBLIC_APP_URL` (public URL for Telnyx webhooks)
+
+3. **Apply schema** (uses `DIRECT_URL`)
+   ```bash
+   npx prisma db push
+   ```
 
 4. **Run**
    ```bash

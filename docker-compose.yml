@@ -14,7 +14,6 @@ services:
         required: false
     environment:
       NODE_ENV: production
-      DATABASE_URL: "file:/app/data/dev.db"
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       CRM_TIMEZONE: ${CRM_TIMEZONE:-America/New_York}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -27,8 +26,6 @@ services:
       GROQ_API_KEY_2: ${GROQ_API_KEY_2:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       CRM_API_KEY: ${CRM_API_KEY:-}
-    volumes:
-      - full_crm_data:/app/data
     restart: unless-stopped
 
   drip:
@@ -39,6 +36,3 @@ services:
       - crm
     restart: unless-stopped
     command: ["sh", "-c", "sleep 10; while true; do curl -sf http://127.0.0.1:3000/api/cron/drip || true; sleep 8; done"]
-
-volumes:
-  full_crm_data:

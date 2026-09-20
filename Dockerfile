@@ -10,7 +10,9 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-ENV DATABASE_URL="file:./dev.db"
+# Dummy URLs for `prisma generate` only — runtime uses compose / host env.
+ENV DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+ENV DIRECT_URL="postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx --no-install prisma generate
 RUN npm run build
@@ -21,8 +23,6 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
-ENV DATABASE_URL="file:/app/data/dev.db"
-
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs \
   && mkdir -p /app/data
@@ -40,4 +40,4 @@ RUN chown -R nextjs:nodejs /app /app/data
 USER nextjs
 EXPOSE 3000
 
-CMD ["sh", "-c", "node node_modules/prisma/build/index.js db push --accept-data-loss --skip-generate && node server.js"]
+CMD ["node", "server.js"]
