@@ -17,12 +17,14 @@ import {
   Play,
   Database,
   Download,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/shared/ui/card";
 import { toast } from "@/shared/ui/use-toast";
+import { businessLink } from "@/shared/utils";
 
 interface SearchInterpretation {
   category: string;
@@ -568,6 +570,7 @@ export default function NativeScraperPage() {
                     <thead>
                       <tr className="border-b border-border bg-background text-left text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
                         <th className="py-4 px-6 font-semibold">Business</th>
+                        <th className="py-4 px-6 font-semibold">Link</th>
                         <th className="py-4 px-6 font-semibold">Owner</th>
                         <th className="py-4 px-6 font-semibold">Phone</th>
                         <th className="py-4 px-6 font-semibold">Location</th>
@@ -576,7 +579,12 @@ export default function NativeScraperPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {results.leads.map((lead) => (
+                      {results.leads.map((lead) => {
+                        const link = businessLink({
+                          website: lead.website,
+                          googleMapsUrl: lead.googleMapsUrl,
+                        });
+                        return (
                         <tr key={lead.id} className="hover:bg-muted/40 transition-colors">
                           <td className="py-4 px-6">
                             <div className="flex items-center gap-3">
@@ -588,6 +596,22 @@ export default function NativeScraperPage() {
                                 </p>
                               </div>
                             </div>
+                          </td>
+                          <td className="py-4 px-6">
+                            {link ? (
+                              <a
+                                href={link.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 text-xs font-sans text-copper hover:underline max-w-[180px]"
+                                title={link.href}
+                              >
+                                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">{link.label}</span>
+                              </a>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
                           </td>
                           <td className="py-4 px-6 text-xs font-sans text-foreground">{lead.name || "—"}</td>
                           <td className="py-4 px-6 font-mono text-xs text-foreground">{lead.phone}</td>
@@ -609,7 +633,8 @@ export default function NativeScraperPage() {
                             </Button>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

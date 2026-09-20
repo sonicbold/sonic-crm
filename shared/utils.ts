@@ -46,6 +46,33 @@ export function timeAgo(date: Date | string): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+export function toHttpUrl(value: string | null | undefined): string | null {
+  const v = (value || "").trim();
+  if (!v || /^no link$/i.test(v)) return null;
+  if (/^https?:\/\//i.test(v)) return v;
+  if (v.startsWith("//")) return `https:${v}`;
+  return `https://${v}`;
+}
+
+export function businessLink(opts: {
+  website?: string | null;
+  googleMapsUrl?: string | null;
+}): { href: string; label: string; kind: "website" | "maps" } | null {
+  const site = toHttpUrl(opts.website);
+  if (site) {
+    let label = (opts.website || site).replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+    try {
+      label = new URL(site).hostname.replace(/^www\./i, "");
+    } catch {
+      /* keep stripped label */
+    }
+    return { href: site, label, kind: "website" };
+  }
+  const maps = toHttpUrl(opts.googleMapsUrl);
+  if (maps) return { href: maps, label: "Google Maps", kind: "maps" };
+  return null;
+}
+
 export function parseCampaignMessage(stepsJson: string): string {
   try {
     const parsed = JSON.parse(stepsJson);

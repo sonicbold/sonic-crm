@@ -4,8 +4,8 @@ import { StatusChip } from "@/shared/layout/status-chip";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
-import { formatPhone, timeAgo } from "@/shared/utils";
-import { Search, Send, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { formatPhone, timeAgo, businessLink } from "@/shared/utils";
+import { Search, Send, Trash2, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { toast } from "@/shared/ui/use-toast";
 
 interface Lead {
@@ -20,6 +20,7 @@ interface Lead {
   rating: number | null;
   reviewCount: number | null;
   website: string | null;
+  googleMapsUrl: string | null;
   createdAt: string;
   source: string;
 }
@@ -145,6 +146,7 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
             <tr className="border-b border-border bg-background/50 text-[11px] font-mono uppercase tracking-widest text-muted-foreground font-semibold">
               <th className="w-10 px-4 py-3"><input type="checkbox" className="rounded border-border" onChange={e => setSelected(e.target.checked ? new Set(leads.map(l => l.id)) : new Set())} /></th>
               <th className="px-4 py-3 text-left">Company</th>
+              <th className="px-4 py-3 text-left">Link</th>
               <th className="px-4 py-3 text-left">Contact</th>
               <th className="px-4 py-3 text-left">Phone & Email</th>
               <th className="px-4 py-3 text-left">Source</th>
@@ -157,13 +159,13 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
             {loading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i} className="border-b border-border/50">
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: 9 }).map((_, j) => (
                     <td key={j} className="px-4 py-4"><div className="h-4 bg-muted animate-pulse rounded-md" /></td>
                   ))}
                 </tr>
               ))
             ) : leads.length === 0 ? (
-              <tr><td colSpan={8} className="px-4 py-16 text-center text-muted-foreground font-sans">No leads yet. Import a CSV or run the scraper.</td></tr>
+              <tr><td colSpan={9} className="px-4 py-16 text-center text-muted-foreground font-sans">No leads yet. Import a CSV or run the scraper.</td></tr>
             ) : (
               leads.map(lead => (
                 <tr key={lead.id} className={`border-b border-border/50 hover:bg-muted/40 transition-colors ${selected.has(lead.id) ? "bg-teal-bright/5" : ""}`}>
@@ -171,6 +173,24 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
                   <td className="px-4 py-3">
                     <p className="font-heading font-semibold text-foreground truncate max-w-[180px]">{lead.businessName || "—"}</p>
                     <p className="text-xs font-sans text-muted-foreground truncate">{lead.city}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const link = businessLink({ website: lead.website, googleMapsUrl: lead.googleMapsUrl });
+                      if (!link) return <span className="text-xs text-muted-foreground">—</span>;
+                      return (
+                        <a
+                          href={link.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-copper hover:underline max-w-[160px]"
+                          title={link.href}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{link.label}</span>
+                        </a>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3 font-sans font-medium text-foreground">{lead.name || "—"}</td>
                   <td className="px-4 py-3">
