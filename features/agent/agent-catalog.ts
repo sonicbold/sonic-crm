@@ -12,7 +12,7 @@ export const AGENT_CATALOG = {
     { method: "GET", path: "/api/v1/health", description: "Liveness + which integrations are configured" },
     { method: "GET", path: "/api/v1/brief", description: "Daily operator brief (Gemini). Query refresh=1 to regenerate" },
     { method: "GET", path: "/api/v1/stats", description: "Dashboard counts" },
-    { method: "GET", path: "/api/v1/leads", description: "List leads. Query: search, status, archived (false|true|all), unenrolled, page, limit" },
+    { method: "GET", path: "/api/v1/leads", description: "List leads. Query: search, status, archived (false|true|all), unenrolled, website (any|with|without), page, limit" },
     { method: "POST", path: "/api/v1/leads", description: "Create lead. Body: phone (required), name, businessName, city, email, website, notes" },
     { method: "POST", path: "/api/v1/leads/import", description: "Bulk upsert. Body: { leads: [{ phone, businessName, name, city }] }" },
     { method: "GET", path: "/api/v1/leads/:id", description: "Lead + recent messages + pending suggestion" },

@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model Lead {
@@ -20,8 +19,8 @@ model Lead {
   website       String?
   rating        Float?
   reviewCount   Int?
-  source        String    @default("manual")   // ai_scraper | outscraper | manual | import
-  status        String    @default("new")       // new | contacted | interested | not_interested | closed
+  source        String    @default("manual") // ai_scraper | outscraper | manual | import
+  status        String    @default("new") // new | contacted | interested | not_interested | closed
   state         String?
   googleMapsUrl String?
   notes         String?
@@ -32,12 +31,12 @@ model Lead {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  searchJobId   String?
-  searchJob     SearchJob? @relation(fields: [searchJobId], references: [id], onDelete: SetNull)
+  searchJobId String?
+  searchJob   SearchJob? @relation(fields: [searchJobId], references: [id], onDelete: SetNull)
 
-  messages        Message[]
-  campaignLeads   CampaignLead[]
-  notifications   Notification[]
+  messages         Message[]
+  campaignLeads    CampaignLead[]
+  notifications    Notification[]
   suggestedReplies SuggestedReply[]
 
   @@index([status])
@@ -49,20 +48,20 @@ model Lead {
 }
 
 model SearchJob {
-  id                 String    @id @default(cuid())
-  prompt             String
-  summary            String
-  category           String?
-  location           String?
-  requested          Int       @default(25)
-  found              Int       @default(0)
-  duplicates         Int       @default(0)
-  newLeads           Int       @default(0)
-  status             String    @default("COMPLETED") // QUEUED | RUNNING | COMPLETED | FAILED
-  createdAt          DateTime  @default(now())
-  completedAt        DateTime?
+  id          String    @id @default(cuid())
+  prompt      String
+  summary     String
+  category    String?
+  location    String?
+  requested   Int       @default(25)
+  found       Int       @default(0)
+  duplicates  Int       @default(0)
+  newLeads    Int       @default(0)
+  status      String    @default("COMPLETED") // QUEUED | RUNNING | COMPLETED | FAILED
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
 
-  leads              Lead[]
+  leads Lead[]
 
   @@index([createdAt])
 }
@@ -71,8 +70,8 @@ model Campaign {
   id          String   @id @default(cuid())
   name        String
   description String?
-  status      String   @default("draft")   // draft | active | paused | completed | stopped
-  steps       String   @default("[]")      // JSON: [{ message }] — one SMS per lead
+  status      String   @default("draft") // draft | active | paused | completed | stopped
+  steps       String   @default("[]") // JSON: [{ message }] — one SMS per lead
   targetCount Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -86,14 +85,15 @@ model CampaignLead {
   campaignId  String
   leadId      String
   currentStep Int       @default(0)
+  variant     Int       @default(0) // 0 = A, 1 = B
   nextSendAt  DateTime?
   sentAt      DateTime?
   lastError   String?
-  status      String    @default("queued")  // queued | scheduled | sent | failed | cancelled | opted_out
+  status      String    @default("queued") // queued | scheduled | sent | failed | cancelled | opted_out
   enrolledAt  DateTime  @default(now())
 
-  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, leadId])
   @@index([status, nextSendAt])
@@ -101,20 +101,21 @@ model CampaignLead {
 }
 
 model Message {
-  id          String   @id @default(cuid())
-  leadId      String
-  campaignId  String?
-  direction   String                   // outbound | inbound
-  body        String
-  twilioSid     String?                  // Telnyx message id
-  status      String   @default("queued")  // queued | sent | delivered | failed
-  sentiment   String?                  // positive | negative | neutral | opted_out
+  id           String   @id @default(cuid())
+  leadId       String
+  campaignId   String?
+  variant      Int      @default(0) // 0 = A, 1 = B
+  direction    String // outbound | inbound
+  body         String
+  twilioSid    String? // Telnyx message id
+  status       String   @default("queued") // queued | sent | delivered | failed
+  sentiment    String? // positive | negative | neutral | opted_out
   isInterested Boolean?
-  aiReplied   Boolean  @default(false)
-  sentAt      DateTime @default(now())
+  aiReplied    Boolean  @default(false)
+  sentAt       DateTime @default(now())
 
-  lead        Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  lead     Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   @@index([leadId])
   @@index([twilioSid])
@@ -152,6 +153,3 @@ model SuggestedReply {
 
   @@index([leadId, status])
 }
-
-
-

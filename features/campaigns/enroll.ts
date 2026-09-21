@@ -1,14 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/shared/db";
-import { parseCampaignMessage } from "@/shared/utils";
+import { parseCampaignMessages } from "@/shared/utils";
 import { reschedulePending, getCampaignProgress } from "@/features/campaigns/drip-runner";
 import { campaignTimezone, describePlan } from "@/features/campaigns/drip-schedule";
 import { getConfig } from "@/shared/settings";
 
+type Enrollment = { campaignId: string; status: string };
+
+function skipReason(
+  lead: {
+    phone: string | null;
+    archived: boolean;
+    status: string;
+    campaignLeads: Enrollment[];
+  } | null,
+  campaignId: string,
+): string | null {
+  if (!lead?.phone) return "no phone";
+  if (lead.archived) return "archived";
+  if (lead.status === "not_interested" || lead.status === "closed") return "do not contact";
+  if (lead.campaignLeads.some((e) => e.campaignId === campaignId)) return "already in this campaign";
+  if (lead.campaignLeads.some((e) => e.status === "queued" || e.status === "scheduled")) {
+    return "already in an active drip";
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const { campaignId, leadIds, count } = await req.json();
   if (!campaignId || !leadIds?.length) {
-    return NextResponse.json({ error: "campaignId and leadIds required" }, { status: 400 });
+    return NextResponse.json({ error: "Select at least one lead to text." }, { status: 400 });
   }
   const cfg = await getConfig();
   if (!cfg.TELNYX_API_KEY || !cfg.TELNYX_PHONE_NUMBER) {
@@ -21,35 +42,54 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "This campaign was stopped. Create a new one." }, { status: 400 });
   }
 
-  const template = parseCampaignMessage(campaign.steps);
-  if (!template) return NextResponse.json({ error: "Campaign has no message" }, { status: 400 });
+  const templates = parseCampaignMessages(campaign.steps);
+  if (!templates.length) return NextResponse.json({ error: "Campaign has no message" }, { status: 400 });
 
-  const target = Math.min(Math.max(1, Number(count) || leadIds.length), leadIds.length);
-  const picked = leadIds.slice(0, target);
+  const uniqueIds = [...new Set((leadIds as string[]).filter(Boolean))];
+  const target = Math.min(Math.max(1, Number(count) || uniqueIds.length), uniqueIds.length);
+  const picked = uniqueIds.slice(0, target);
   const queuedIds: string[] = [];
+  const skipped: string[] = [];
 
-  for (const leadId of picked) {
+  for (let index = 0; index < picked.length; index++) {
+    const leadId = picked[index];
     const lead = await prisma.lead.findUnique({
       where: { id: leadId },
-      include: { campaignLeads: true },
+      include: { campaignLeads: { select: { campaignId: true, status: true } } },
     });
-    if (!lead?.phone) continue;
-    if (lead.campaignLeads && lead.campaignLeads.length > 0) continue;
-    if (lead.status !== "new") continue;
+    const reason = skipReason(lead, campaignId);
+    if (reason) {
+      skipped.push(reason);
+      continue;
+    }
 
     await prisma.campaignLead.create({
-      data: { campaignId, leadId, status: "queued", currentStep: 0 },
+      data: {
+        campaignId,
+        leadId,
+        status: "queued",
+        currentStep: 0,
+        variant: templates.length > 1 ? index % 2 : 0,
+      },
     });
     queuedIds.push(leadId);
   }
 
   if (!queuedIds.length) {
-    return NextResponse.json({ error: "No eligible new leads to queue. Each lead can only be enrolled once." }, { status: 400 });
+    const hint = skipped[0] ? ` (${skipped[0]})` : "";
+    return NextResponse.json(
+      { error: `No eligible leads to queue${hint}. Uncheck people already in a drip.` },
+      { status: 400 },
+    );
   }
 
+  const total = await prisma.campaignLead.count({ where: { campaignId } });
   await prisma.campaign.update({
     where: { id: campaignId },
-    data: { status: "active", targetCount: queuedIds.length },
+    data: {
+      status: campaign.status === "paused" ? "paused" : "active",
+      targetCount: total,
+    },
   });
 
   const { times } = await reschedulePending(campaignId, new Date());
@@ -59,6 +99,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     enrolled: queuedIds.length,
+    skipped: skipped.length,
     requested: target,
     plan,
     progress,

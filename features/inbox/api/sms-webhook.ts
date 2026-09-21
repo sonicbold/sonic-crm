@@ -55,8 +55,9 @@ export async function POST(req: NextRequest) {
       const existingMsg = await prisma.message.findFirst({ where: { twilioSid: messageId } });
       if (existingMsg) return ok();
 
+      const lastOutbound = await prisma.message.findFirst({ where: { leadId: lead.id, direction: "outbound", campaignId: { not: null } }, orderBy: { sentAt: "desc" }, select: { campaignId: true, variant: true } });
       const inboundMsg = await prisma.message.create({
-        data: { leadId: lead.id, direction: "inbound", body, twilioSid: messageId, status: "delivered", sentiment: null, isInterested: null },
+        data: { leadId: lead.id, campaignId: lastOutbound?.campaignId || null, variant: lastOutbound?.variant || 0, direction: "inbound", body, twilioSid: messageId, status: "delivered", sentiment: null, isInterested: null },
       });
 
       await handleInboundSms(lead.id, inboundMsg.id, body);

@@ -1,6 +1,6 @@
 import { prisma } from "@/shared/db";
 import { sendSMS } from "@/features/inbox/telnyx";
-import { interpolateMessage, ensureE164, parseCampaignMessage } from "@/shared/utils";
+import { interpolateMessage, ensureE164, parseCampaignMessages } from "@/shared/utils";
 import {
   campaignTimezone,
   isInSendWindow,
@@ -120,7 +120,8 @@ export async function processDueSends(limit = 1) {
   let failed = 0;
 
   for (const row of due) {
-    const template = parseCampaignMessage(row.campaign.steps);
+    const templates = parseCampaignMessages(row.campaign.steps);
+    const template = templates[row.variant] || templates[0];
     if (!template || !row.lead.phone) {
       await prisma.campaignLead.update({
         where: { id: row.id },
@@ -137,6 +138,7 @@ export async function processDueSends(limit = 1) {
         data: {
           leadId: row.leadId,
           campaignId: row.campaignId,
+          variant: row.variant,
           direction: "outbound",
           body,
           twilioSid: sid,

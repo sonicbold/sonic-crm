@@ -38,6 +38,7 @@ export async function handleInboundSms(leadId: string, inboundId: string, body: 
       await prisma.message.create({
         data: {
           leadId: lead.id,
+          campaignId: (await prisma.message.findUnique({ where: { id: inboundId }, select: { campaignId: true } }))?.campaignId || null,
           direction: "outbound",
           body: goodbye,
           twilioSid: sid,

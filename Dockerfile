@@ -10,9 +10,7 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Dummy URLs for `prisma generate` only — runtime uses compose / host env.
-ENV DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
-ENV DIRECT_URL="postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+ENV DATABASE_URL="file:./dev.db"
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx --no-install prisma generate
 RUN npm run build

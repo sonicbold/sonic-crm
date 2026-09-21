@@ -54,6 +54,25 @@ export function toHttpUrl(value: string | null | undefined): string | null {
   return `https://${v}`;
 }
 
+export function leadHasWebsite(website?: string | null): boolean {
+  return Boolean(toHttpUrl(website));
+}
+
+/** Prisma where-clause matching Finder: real site vs missing / "No link". */
+export function websitePrismaWhere(filter: string | null | undefined): Record<string, unknown> {
+  if (filter !== "with" && filter !== "without") return {};
+  const missing = {
+    OR: [
+      { website: null },
+      { website: "" },
+      { website: "No link" },
+      { website: "no link" },
+      { website: "No Link" },
+    ],
+  };
+  return filter === "without" ? missing : { NOT: missing };
+}
+
 export function businessLink(opts: {
   website?: string | null;
   googleMapsUrl?: string | null;
@@ -83,4 +102,19 @@ export function parseCampaignMessage(stepsJson: string): string {
   } catch {
     return stepsJson || "";
   }
+}
+
+export function parseCampaignMessages(stepsJson: string): string[] {
+  try {
+    const parsed = JSON.parse(stepsJson);
+    if (typeof parsed === "string") return [parsed];
+    if (Array.isArray(parsed)) {
+      const messages = parsed.map((step) => typeof step === "string" ? step : step?.message).filter((value): value is string => Boolean(value));
+      return messages.length ? messages.slice(0, 2) : [];
+    }
+    if (parsed && typeof parsed === "object" && typeof parsed.message === "string") return [parsed.message];
+  } catch {
+    return stepsJson ? [stepsJson] : [];
+  }
+  return [];
 }

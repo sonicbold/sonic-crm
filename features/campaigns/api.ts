@@ -38,11 +38,13 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { name, description, message, status = "draft" } = await req.json();
-  if (!name || !message) return NextResponse.json({ error: "Name and message required" }, { status: 400 });
+  const { name, description, message, messageA, messageB, status = "draft" } = await req.json();
+  const first = String(messageA || message || "").trim();
+  const second = String(messageB || "").trim();
+  if (!name || !first) return NextResponse.json({ error: "Name and message required" }, { status: 400 });
 
   const campaign = await prisma.campaign.create({
-    data: { name, description, steps: JSON.stringify([{ message }]), status },
+    data: { name, description, steps: JSON.stringify([{ message: first }, ...(second ? [{ message: second }] : [])]), status },
   });
   return NextResponse.json(campaign, { status: 201 });
 }

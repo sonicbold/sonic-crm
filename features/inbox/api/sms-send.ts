@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   try {
     const { sid, status } = await sendSMS(ensureE164(lead.phone), message);
     const msg = await prisma.message.create({
-      data: { leadId, direction: "outbound", body: message, twilioSid: sid, status: "queued" },
+      data: { leadId, direction: "outbound", body: message, twilioSid: sid, status: status === "failed" ? "failed" : "queued" },
     });
     await prisma.lead.update({ where: { id: leadId }, data: { status: lead.status === "new" ? "contacted" : lead.status } });
     if (suggestionId) {

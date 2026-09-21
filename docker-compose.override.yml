@@ -1,0 +1,11 @@
+# Local-only: this PC cannot open TLS to the Supabase pooler.
+# The rebuilt image still includes the Link column; data comes from the SQLite volume.
+services:
+  crm:
+    environment:
+      DATABASE_URL: "file:/app/data/dev.db"
+    volumes:
+      - full_crm_data:/app/data
+
+volumes:
+  full_crm_data:

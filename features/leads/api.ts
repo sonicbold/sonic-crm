@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/shared/db";
 import { z } from "zod";
-import { ensureE164 } from "@/shared/utils";
+import { ensureE164, websitePrismaWhere } from "@/shared/utils";
 
 const CreateLeadSchema = z.object({
   name: z.string().optional().nullable(),
@@ -36,12 +36,14 @@ export async function GET(req: NextRequest) {
 
     const archived = searchParams.get("archived");
     const unenrolledOnly = searchParams.get("unenrolled") === "true";
+    const website = searchParams.get("website");
 
     const where: Record<string, unknown> = {
       ...(archived === "true" ? { archived: true } : archived === "all" ? {} : { archived: false }),
       ...(status && status !== "all" ? { status } : {}),
       ...(source && source !== "all" ? { source } : {}),
       ...(unenrolledOnly ? { campaignLeads: { none: {} } } : {}),
+      ...websitePrismaWhere(website),
       ...(search ? {
         OR: [
           { name: { contains: search } },
@@ -53,8 +55,28 @@ export async function GET(req: NextRequest) {
       } : {}),
     };
 
+    const picker = searchParams.get("picker") === "true";
+
     const [data, total] = await Promise.all([
-      prisma.lead.findMany({ where, orderBy: { createdAt: "desc" }, skip, take: limit }),
+      prisma.lead.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+        ...(picker
+          ? {
+              include: {
+                campaignLeads: {
+                  select: {
+                    campaignId: true,
+                    status: true,
+                    campaign: { select: { id: true, name: true, status: true } },
+                  },
+                },
+              },
+            }
+          : {}),
+      }),
       prisma.lead.count({ where }),
     ]);
 

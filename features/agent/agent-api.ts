@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/shared/db";
-import { ensureE164 } from "@/shared/utils";
+import { ensureE164, websitePrismaWhere } from "@/shared/utils";
 import { getConfig, configStatus } from "@/shared/settings";
 import { sendSMS } from "@/features/inbox/telnyx";
 import { parseCampaignMessage } from "@/shared/utils";
@@ -81,12 +81,14 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
     const search = q(req).get("search") || "";
     const archived = q(req).get("archived");
     const unenrolledOnly = q(req).get("unenrolled") === "true";
+    const website = q(req).get("website");
     const page = Math.max(1, parseInt(q(req).get("page") || "1"));
     const limit = Math.min(200, Math.max(1, parseInt(q(req).get("limit") || "50")));
     const where: Record<string, unknown> = {
       ...(archived === "true" ? { archived: true } : archived === "all" ? {} : { archived: false }),
       ...(status && status !== "all" ? { status } : {}),
       ...(unenrolledOnly ? { campaignLeads: { none: {} } } : {}),
+      ...websitePrismaWhere(website),
       ...(search
         ? {
             OR: [
@@ -279,13 +281,18 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
     for (const leadId of picked) {
       const lead = await prisma.lead.findUnique({ where: { id: leadId }, include: { campaignLeads: true } });
       if (!lead?.phone) continue;
-      if (lead.campaignLeads?.length) continue;
-      if (lead.status !== "new") continue;
+      if (lead.archived) continue;
+      if (lead.campaignLeads?.some((e) => e.campaignId === b || e.status === "queued" || e.status === "scheduled")) continue;
+      if (lead.status === "not_interested" || lead.status === "closed") continue;
       await prisma.campaignLead.create({ data: { campaignId: b, leadId, status: "queued", currentStep: 0 } });
       queuedIds.push(leadId);
     }
-    if (!queuedIds.length) return json({ error: "No eligible new leads to queue" }, 400);
-    await prisma.campaign.update({ where: { id: b }, data: { status: "active", targetCount: queuedIds.length } });
+    if (!queuedIds.length) return json({ error: "No eligible leads to queue" }, 400);
+    const total = await prisma.campaignLead.count({ where: { campaignId: b } });
+    await prisma.campaign.update({
+      where: { id: b },
+      data: { status: campaign.status === "paused" ? "paused" : "active", targetCount: total },
+    });
     const { times } = await reschedulePending(b, new Date());
     return json({
       enrolled: queuedIds.length,

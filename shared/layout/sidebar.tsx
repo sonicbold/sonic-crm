@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Search, Megaphone, Settings, Droplets, Inbox } from "lucide-react";
+import { LayoutDashboard, Users, Search, Megaphone, Settings, Droplets, Inbox, BarChart3 } from "lucide-react";
 import { cn } from "@/shared/utils";
 
 const nav = [
@@ -10,6 +10,7 @@ const nav = [
   { href: "/scraper", label: "Lead Scraper", icon: Search },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/inbox", label: "Inbox", icon: Inbox },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
 ];
 
 export function Sidebar() {
