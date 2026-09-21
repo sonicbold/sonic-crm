@@ -44,10 +44,27 @@ export type Lead = {
   note?: string;
 };
 
+/** Live scrape/enrich status shown in the Finder UI. */
+export type FinderStatus = {
+  target: number;
+  validLeads: number;
+  remaining: number;
+  aiProvider: string;
+  nextRequestInMs: number;
+};
+
 export type PipelineEvent =
   | { type: "step"; step: number; label: string }
   | { type: "log"; message: string }
   | { type: "progress"; current: number; total: number; message: string }
+  | {
+      type: "status";
+      target?: number;
+      validLeads?: number;
+      remaining?: number;
+      aiProvider?: string;
+      nextRequestInMs?: number;
+    }
   | { type: "parsed"; parsed: ParsedRequest }
   | { type: "done"; leads: Lead[]; warnings: string[]; csvFilename: string }
   | { type: "error"; message: string };

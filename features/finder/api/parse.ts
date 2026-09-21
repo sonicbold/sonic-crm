@@ -51,9 +51,6 @@ export async function POST(req: NextRequest) {
       apiKey: settings.GEMINI_API_KEY,
       model: settings.GEMINI_MODEL,
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7866/ingest/e617e1c7-3fd6-486a-a1f7-ae85faba0110',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9903e8'},body:JSON.stringify({sessionId:'9903e8',runId:'pre-fix',hypothesisId:'D',location:'app/api/scraper/parse/route.ts:POST',message:'parsed search request',data:{prompt:String(prompt).slice(0,160),city:parsed.city,businessType:parsed.businessType,maxReviews:parsed.maxReviews,websitePreference:parsed.websitePreference,targetCount:parsed.targetCount},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return NextResponse.json(toInterpretation(parsed));
   } catch (err: unknown) {
     return NextResponse.json(

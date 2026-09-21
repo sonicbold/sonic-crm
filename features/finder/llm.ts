@@ -1,9 +1,30 @@
 import Groq from "groq-sdk";
-import type { Review } from "@/features/finder/types";
+import type { AppSettings, Review } from "@/features/finder/types";
+import {
+  AiRequestPool,
+  RateLimitError,
+  isDailyLimitMessage,
+  isRateLimitError,
+  loadAiPoolLimits,
+  parseRetryAfterMs,
+  retryAfterFromMessage,
+  toRateLimitError,
+  type AiCompleteCall,
+  type AiPoolStatus,
+  type AiProviderConfig,
+} from "@/features/finder/ai-pool";
 
 export type ReviewInsight = {
   summary: string;
   ownerName: string;
+};
+
+export {
+  AiRequestPool,
+  RateLimitError,
+  isRateLimitError,
+  loadAiPoolLimits,
+  toRateLimitError,
 };
 
 const GROQ_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"];
@@ -18,11 +39,6 @@ Your task:
 3. Ignore the Google reviewer byline. Do not treat the business name as a person.
 4. If no personal name appears in the text, respond with "Owner name not found" — do not guess a name that is not written.
 5. Output only the owner's name (first and last if available), with no extra commentary.`;
-
-type LlmProvider = {
-  name: string;
-  complete: (opts: { system: string; user: string; json?: boolean }) => Promise<string>;
-};
 
 function formatReviews(reviews: Review[]): string {
   return reviews
@@ -63,7 +79,17 @@ function parseSummary(raw: string): string {
   }
 }
 
-async function groqComplete(apiKey: string, preferredModel: string, opts: { system: string; user: string; json?: boolean }) {
+function groqErrorStatus(err: unknown): number | undefined {
+  if (!err || typeof err !== "object") return undefined;
+  const n = Number((err as { status?: unknown; statusCode?: unknown }).status ?? (err as { statusCode?: unknown }).statusCode);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+export async function groqComplete(
+  apiKey: string,
+  preferredModel: string,
+  opts: AiCompleteCall,
+): Promise<string> {
   const models = [preferredModel, ...GROQ_MODELS.filter((m) => m !== preferredModel)];
   let lastError: unknown;
   for (const model of models) {
@@ -81,16 +107,21 @@ async function groqComplete(apiKey: string, preferredModel: string, opts: { syst
       return completion.choices[0]?.message?.content ?? "";
     } catch (err) {
       lastError = err;
+      const status = groqErrorStatus(err);
+      if (status === 429 || isRateLimitError(err)) {
+        throw toRateLimitError(err, "Groq");
+      }
+      if (status === 404) continue;
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
-async function openrouterComplete(
+export async function openrouterComplete(
   apiKey: string,
   model: string,
-  opts: { system: string; user: string; json?: boolean },
-) {
+  opts: AiCompleteCall,
+): Promise<string> {
   const body: Record<string, unknown> = {
     model,
     temperature: 0.1,
@@ -115,92 +146,92 @@ async function openrouterComplete(
     choices?: { message?: { content?: string } }[];
     error?: { message?: string };
   };
+  const message = data.error?.message ?? JSON.stringify(data).slice(0, 200);
+  if (res.status === 429 || isRateLimitError({ status: res.status, message })) {
+    const retryHeader = res.headers.get("retry-after");
+    throw new RateLimitError(`OpenRouter rate limit: ${message}`.slice(0, 400), {
+      retryAfterMs: retryHeader ? parseRetryAfterMs(retryHeader) : retryAfterFromMessage(message),
+      daily: isDailyLimitMessage(message),
+    });
+  }
   if (!res.ok) {
-    throw new Error(`OpenRouter failed (${res.status}): ${data.error?.message ?? JSON.stringify(data).slice(0, 200)}`);
+    throw new Error(`OpenRouter failed (${res.status}): ${message}`);
   }
   return data.choices?.[0]?.message?.content ?? "";
 }
 
-function listProviders(opts: {
-  groqKey1: string;
-  groqKey2: string;
-  groqModel: string;
-  openrouterKey: string;
-  openrouterModel: string;
-}): LlmProvider[] {
-  const providers: LlmProvider[] = [];
-  if (opts.groqKey1) {
+export function createAiPool(
+  settings: AppSettings,
+  onStatus?: (status: AiPoolStatus) => void,
+  overrides?: { now?: () => number; sleep?: (ms: number) => Promise<void> },
+): AiRequestPool {
+  const limits = loadAiPoolLimits();
+  const providers: AiProviderConfig[] = [];
+  if (settings.GROQ_API_KEY_1) {
     providers.push({
-      name: "groq-1",
-      complete: (call) => groqComplete(opts.groqKey1, opts.groqModel, call),
+      id: "groq-1",
+      label: "Groq Key 1",
+      family: "groq",
+      rpm: limits.groqRpm,
+      rpd: limits.groqRpd,
+      complete: (call) => groqComplete(settings.GROQ_API_KEY_1, settings.GROQ_MODEL, call),
     });
   }
-  if (opts.groqKey2) {
+  if (settings.GROQ_API_KEY_2) {
     providers.push({
-      name: "groq-2",
-      complete: (call) => groqComplete(opts.groqKey2, opts.groqModel, call),
+      id: "groq-2",
+      label: "Groq Key 2",
+      family: "groq",
+      rpm: limits.groqRpm,
+      rpd: limits.groqRpd,
+      complete: (call) => groqComplete(settings.GROQ_API_KEY_2, settings.GROQ_MODEL, call),
     });
   }
-  if (opts.openrouterKey) {
+  if (settings.OPENROUTER_API_KEY) {
     providers.push({
-      name: "openrouter",
-      complete: (call) => openrouterComplete(opts.openrouterKey, opts.openrouterModel, call),
+      id: "openrouter",
+      label: "OpenRouter",
+      family: "openrouter",
+      rpm: limits.openrouterRpm,
+      rpd: limits.openrouterRpd,
+      complete: (call) => openrouterComplete(settings.OPENROUTER_API_KEY, settings.OPENROUTER_MODEL, call),
     });
   }
-  return providers;
-}
-
-async function completeWithFallback(
-  providers: LlmProvider[],
-  startIndex: number,
-  call: { system: string; user: string; json?: boolean },
-): Promise<string> {
-  if (!providers.length) throw new Error("No Groq or OpenRouter key is configured.");
-  let lastError: unknown;
-  for (let offset = 0; offset < providers.length; offset++) {
-    const provider = providers[(startIndex + offset) % providers.length];
-    try {
-      return await provider.complete(call);
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  return new AiRequestPool({
+    providers,
+    minDelayMs: limits.minDelayMs,
+    onStatus,
+    now: overrides?.now,
+    sleep: overrides?.sleep,
+  });
 }
 
 export async function summarizeReviews(opts: {
-  index: number;
   businessName: string;
   reviews: Review[];
-  groqKey1: string;
-  groqKey2: string;
-  groqModel: string;
-  openrouterKey: string;
-  openrouterModel: string;
+  pool: AiRequestPool;
 }): Promise<ReviewInsight> {
   if (!opts.reviews.length) {
     return { summary: "No recent reviews were available to summarize.", ownerName: "Owner name not found" };
   }
 
-  const providers = listProviders(opts);
-  const start = opts.index % Math.max(providers.length, 1);
   const reviewBlock = formatReviews(opts.reviews);
   const user = `Business: ${opts.businessName}\n\n${reviewBlock}`;
 
-  const [summaryRaw, ownerRaw] = await Promise.all([
-    completeWithFallback(providers, start, {
+  const [summaryRes, ownerRes] = await Promise.all([
+    opts.pool.complete({
       system: 'Summarize these Google reviews in 2-3 sentences. Reply with JSON: {"summary":"..."}.',
       user,
       json: true,
     }),
-    completeWithFallback(providers, start, {
+    opts.pool.complete({
       system: OWNER_PROMPT,
       user,
     }),
   ]);
 
   return {
-    summary: parseSummary(summaryRaw),
-    ownerName: cleanOwnerName(ownerRaw),
+    summary: parseSummary(summaryRes.text),
+    ownerName: cleanOwnerName(ownerRes.text),
   };
 }

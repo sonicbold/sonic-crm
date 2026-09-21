@@ -1,18 +1,26 @@
 import { summarizeReviews } from "@/features/finder/llm";
-import type { AppSettings, Lead, MapPlace, ParsedRequest, Review } from "@/features/finder/types";
+import type { AiRequestPool } from "@/features/finder/ai-pool";
+import type { Lead, MapPlace, ParsedRequest, Review } from "@/features/finder/types";
+import { isUsableLead } from "@/features/finder/valid";
 import { mapPool, placeKey } from "./pool";
 
-const ENRICH_CONCURRENCY = 4;
+const ENRICH_CONCURRENCY = 2;
 
 export async function enrichLeads(opts: {
   places: MapPlace[];
   reviews: Map<string, Review[]>;
   parsed: ParsedRequest;
-  settings: AppSettings;
+  pool: AiRequestPool;
+  need: number;
   onPlace?: (info: { current: number; total: number; title: string }) => void;
-}): Promise<{ leads: Lead[]; warnings: string[] }> {
+  onValid?: (lead: Lead, validCount: number) => void;
+}): Promise<{ leads: Lead[]; attempted: Lead[]; warnings: string[] }> {
   const warnings: string[] = [];
-  const leads = await mapPool(opts.places, ENRICH_CONCURRENCY, async (place, i) => {
+  const attempted: Lead[] = [];
+  let validCount = 0;
+
+  await mapPool(opts.places, ENRICH_CONCURRENCY, async (place, i) => {
+    if (validCount >= opts.need) return;
     opts.onPlace?.({ current: i + 1, total: opts.places.length, title: place.title });
     const key = placeKey(place);
     let summary = "";
@@ -21,14 +29,9 @@ export async function enrichLeads(opts: {
 
     try {
       const insight = await summarizeReviews({
-        index: i,
         businessName: place.title,
         reviews: opts.reviews.get(key) ?? [],
-        groqKey1: opts.settings.GROQ_API_KEY_1,
-        groqKey2: opts.settings.GROQ_API_KEY_2,
-        groqModel: opts.settings.GROQ_MODEL,
-        openrouterKey: opts.settings.OPENROUTER_API_KEY,
-        openrouterModel: opts.settings.OPENROUTER_MODEL,
+        pool: opts.pool,
       });
       summary = insight.summary;
       ownerName = insight.ownerName;
@@ -38,7 +41,7 @@ export async function enrichLeads(opts: {
       warnings.push(`${place.title}: ${note}`);
     }
 
-    return {
+    const lead: Lead = {
       index: i + 1,
       ownerName,
       businessName: place.title,
@@ -51,8 +54,19 @@ export async function enrichLeads(opts: {
       summary,
       reviewsCount: place.reviewsCount,
       note,
-    } satisfies Lead;
+    };
+    attempted.push(lead);
+    if (isUsableLead(lead) && validCount < opts.need) {
+      validCount += 1;
+      lead.index = validCount;
+      opts.onValid?.(lead, validCount);
+    }
   });
 
-  return { leads, warnings };
+  const leads = attempted.filter(isUsableLead).slice(0, opts.need).map((lead, i) => ({
+    ...lead,
+    index: i + 1,
+  }));
+
+  return { leads, attempted, warnings };
 }

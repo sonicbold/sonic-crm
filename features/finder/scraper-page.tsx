@@ -84,6 +84,16 @@ const PRESETS = [
   "Find 15 dentists in Austin, TX under 200 reviews",
 ];
 
+function formatNextRequest(ms: number): string {
+  if (ms <= 50) return "now";
+  const seconds = ms / 1000;
+  if (seconds < 10) return `in ${seconds.toFixed(1)}s`;
+  if (seconds < 60) return `in ${Math.round(seconds)}s`;
+  const minutes = seconds / 60;
+  if (minutes < 10) return `in ${minutes.toFixed(1)}m`;
+  return `in ${Math.round(minutes)}m`;
+}
+
 export default function NativeScraperPage() {
   const [activeTab, setActiveTab] = useState<"search" | "history">("search");
   const [prompt, setPrompt] = useState(PRESETS[0]);
@@ -103,6 +113,15 @@ export default function NativeScraperPage() {
 
   const [jobs, setJobs] = useState<SearchJob[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [finderStatus, setFinderStatus] = useState<{
+    target: number;
+    validLeads: number;
+    remaining: number;
+    aiProvider: string;
+    nextRequestInMs: number;
+    receivedAt: number;
+  } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   async function handleParse(customPrompt?: string) {
     const text = customPrompt || prompt;
@@ -133,9 +152,6 @@ export default function NativeScraperPage() {
     try {
       const res = await fetch("/api/scraper/jobs");
       const data = await res.json();
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/e617e1c7-3fd6-486a-a1f7-ae85faba0110',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9903e8'},body:JSON.stringify({sessionId:'9903e8',runId:'pre-fix',hypothesisId:'E',location:'app/(dashboard)/scraper/page.tsx:loadJobs',message:'jobs fetch',data:{ok:res.ok,status:res.status,jobCount:Array.isArray(data.jobs)?data.jobs.length:null,keys:data&&typeof data==='object'?Object.keys(data):[],error:data&&data.error},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (res.ok) setJobs(data.jobs || []);
     } catch (e) {
       console.error(e);
@@ -150,6 +166,12 @@ export default function NativeScraperPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!searching) return;
+    const timer = setInterval(() => setNow(Date.now()), 200);
+    return () => clearInterval(timer);
+  }, [searching]);
+
   async function handleSearch() {
     if (!prompt.trim() || searching) return;
     setSearching(true);
@@ -158,6 +180,7 @@ export default function NativeScraperPage() {
     setWarnings([]);
     setCsvFilename("");
     setProgress(null);
+    setFinderStatus(null);
     setStep(1);
     try {
       const res = await fetch("/api/scraper/execute", {
@@ -181,6 +204,17 @@ export default function NativeScraperPage() {
             total: Number(event.total) || 0,
             message: String(event.message || ""),
           });
+        }
+        if (event.type === "status") {
+          setFinderStatus((prev) => ({
+            target: typeof event.target === "number" ? event.target : prev?.target ?? 0,
+            validLeads: typeof event.validLeads === "number" ? event.validLeads : prev?.validLeads ?? 0,
+            remaining: typeof event.remaining === "number" ? event.remaining : prev?.remaining ?? 0,
+            aiProvider: event.aiProvider != null ? String(event.aiProvider) : prev?.aiProvider ?? "waiting",
+            nextRequestInMs:
+              typeof event.nextRequestInMs === "number" ? event.nextRequestInMs : prev?.nextRequestInMs ?? 0,
+            receivedAt: Date.now(),
+          }));
         }
         if (event.type === "parsed" && event.parsed && typeof event.parsed === "object") {
           const parsed = event.parsed as {
@@ -246,9 +280,6 @@ export default function NativeScraperPage() {
         if (!line) return;
         try {
           const event = JSON.parse(line.slice(6).trim()) as Record<string, unknown>;
-          // #region agent log
-          fetch('http://127.0.0.1:7866/ingest/e617e1c7-3fd6-486a-a1f7-ae85faba0110',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9903e8'},body:JSON.stringify({sessionId:'9903e8',runId:'pre-fix',hypothesisId:'E',location:'app/(dashboard)/scraper/page.tsx:consume',message:'sse event',data:{type:event.type,step:event.step,hasStats:Boolean(event.stats)},timestamp:Date.now()})}).catch(()=>{});
-          // #endregion
           applyEvent(event);
         } catch {
           /* Ignore malformed SSE frames. */
@@ -285,7 +316,7 @@ export default function NativeScraperPage() {
 
   return (
     <div className="space-y-6 animate-fade-in max-w-7xl mx-auto pb-12">
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <p className="text-[10px] font-mono font-bold text-copper uppercase tracking-[0.15em] mb-2">Discovery</p>
           <h1 className="text-4xl font-heading font-bold tracking-tight text-foreground">AI Lead Scraper</h1>
@@ -294,7 +325,7 @@ export default function NativeScraperPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="flex rounded-xl bg-card border border-border p-1 shadow-sm">
             <button
               onClick={() => setActiveTab("search")}
@@ -318,6 +349,13 @@ export default function NativeScraperPage() {
               History ({jobs.length})
             </button>
           </div>
+
+          <Button variant="outline" className="rounded-xl border-border bg-background" asChild>
+            <a href="/api/export/all">
+              <Download className="h-4 w-4 mr-2 text-copper" />
+              Download all leads
+            </a>
+          </Button>
 
           <Button variant="outline" className="rounded-xl border-border bg-background" asChild>
             <Link href="/leads">
@@ -482,6 +520,43 @@ export default function NativeScraperPage() {
                     );
                   })}
                 </div>
+                {finderStatus && (
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Target</p>
+                      <p className="text-xl font-heading font-bold text-foreground mt-1">{finderStatus.target}</p>
+                    </div>
+                    <div className="rounded-xl border border-teal-bright/30 bg-teal-bright/5 p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-teal-bright">Valid leads</p>
+                      <p className="text-xl font-heading font-bold text-teal-bright mt-1">{finderStatus.validLeads}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Remaining</p>
+                      <p className="text-xl font-heading font-bold text-foreground mt-1">
+                        {Math.max(
+                          0,
+                          finderStatus.remaining || finderStatus.target - finderStatus.validLeads,
+                        )}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">AI provider</p>
+                      <p className="text-sm font-sans font-semibold text-foreground mt-1 truncate" title={finderStatus.aiProvider}>
+                        {finderStatus.aiProvider || "waiting"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-copper/30 bg-copper/5 p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-copper">Next request</p>
+                      <p className="text-sm font-sans font-semibold text-foreground mt-1">
+                        {searching
+                          ? formatNextRequest(
+                              Math.max(0, finderStatus.nextRequestInMs - (now - finderStatus.receivedAt)),
+                            )
+                          : "idle"}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {progress && (
                   <p className="text-xs font-sans text-muted-foreground">
                     {progress.message} ({progress.current}/{progress.total})
@@ -508,10 +583,16 @@ export default function NativeScraperPage() {
                   <Button size="sm" variant="outline" className="rounded-xl h-8 text-xs" asChild>
                     <a href={`/api/export?file=${encodeURIComponent(csvFilename)}`}>
                       <Download className="h-3.5 w-3.5 mr-1.5" />
-                      CSV
+                      Last run CSV
                     </a>
                   </Button>
                 )}
+                <Button size="sm" variant="outline" className="rounded-xl h-8 text-xs" asChild>
+                  <a href="/api/export/all">
+                    <Download className="h-3.5 w-3.5 mr-1.5" />
+                    Download all leads
+                  </a>
+                </Button>
               </div>
 
               {warnings.length > 0 && (
