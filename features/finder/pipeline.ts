@@ -1,10 +1,25 @@
 import { saveCsv } from "@/features/finder/csv";
+import { createAiPool } from "@/features/finder/llm";
+import { collectValidLeads } from "@/features/finder/collect";
 import { assertReady, loadSettings } from "@/features/finder/settings";
 import type { PipelineEvent } from "@/features/finder/types";
-import { enrichLeads } from "@/features/finder/workflows/enrichLeads";
-import { findListings } from "@/features/finder/workflows/findListings";
 import { parseRequest } from "@/features/finder/workflows/parseRequest";
-import { pullReviews } from "@/features/finder/workflows/pullReviews";
+import { prisma } from "@/shared/db";
+import { phoneKey } from "@/features/finder/valid";
+
+async function loadExistingPhones(): Promise<Set<string>> {
+  try {
+    const rows = await prisma.lead.findMany({ select: { phone: true } });
+    const keys = new Set<string>();
+    for (const row of rows) {
+      const key = phoneKey(row.phone);
+      if (key) keys.add(key);
+    }
+    return keys;
+  } catch {
+    return new Set();
+  }
+}
 
 export async function runPipeline(
   userPrompt: string,
@@ -13,96 +28,89 @@ export async function runPipeline(
   const settings = await loadSettings();
   assertReady(settings);
   const warnings: string[] = [];
+  let activeProvider = "waiting";
+  let lastStatus = {
+    target: 0,
+    validLeads: 0,
+    remaining: 0,
+    aiProvider: "waiting",
+    nextRequestInMs: 0,
+  };
+
+  const emitAll = (event: PipelineEvent) => {
+    if (event.type === "status") {
+      lastStatus = {
+        target: event.target ?? lastStatus.target,
+        validLeads: event.validLeads ?? lastStatus.validLeads,
+        remaining:
+          event.remaining ??
+          Math.max(
+            0,
+            (event.target ?? lastStatus.target) - (event.validLeads ?? lastStatus.validLeads),
+          ),
+        aiProvider: event.aiProvider ?? lastStatus.aiProvider,
+        nextRequestInMs: event.nextRequestInMs ?? lastStatus.nextRequestInMs,
+      };
+      emit({ type: "status", ...lastStatus });
+      return;
+    }
+    emit(event);
+  };
+
+  const pool = createAiPool(settings, (status) => {
+    activeProvider = status.provider;
+    emitAll({
+      type: "status",
+      aiProvider: status.provider,
+      nextRequestInMs: status.nextRequestInMs,
+    });
+  });
 
   try {
-    emit({ type: "step", step: 1, label: "Understand the request" });
-    emit({ type: "log", message: "Reading your request with Gemini…" });
+    emitAll({ type: "step", step: 1, label: "Understand the request" });
+    emitAll({ type: "log", message: "Reading your request with Gemini…" });
     const parsed = await parseRequest({
       prompt: userPrompt,
       apiKey: settings.GEMINI_API_KEY,
       model: settings.GEMINI_MODEL,
     });
-    emit({ type: "parsed", parsed });
-    emit({
+    emitAll({ type: "parsed", parsed });
+    emitAll({
       type: "log",
-      message: `Looking for ${parsed.targetCount} ${parsed.businessType} in ${parsed.city}${
+      message: `Target is ${parsed.targetCount} valid processed ${parsed.businessType} in ${parsed.city}${
         parsed.maxReviews !== null ? `, under ${parsed.maxReviews} reviews` : ""
-      }, website: ${parsed.websitePreference}.`,
+      }, website: ${parsed.websitePreference}. Duplicate, filter-fail, and AI-fail rows do not count.`,
+    });
+    emitAll({
+      type: "status",
+      target: parsed.targetCount,
+      validLeads: 0,
+      remaining: parsed.targetCount,
+      aiProvider: activeProvider,
+      nextRequestInMs: 0,
     });
 
-    emit({ type: "step", step: 2, label: "Search Google Maps" });
-    const listings = await findListings({
-      token: settings.APIFY_API_TOKEN,
-      actorId: settings.APIFY_MAPS_ACTOR,
-      parsed,
-    });
-    emit({
-      type: "log",
-      message: `Asked Apify for up to ${listings.fetchCount} listings; got ${listings.rawCount} unique results.`,
-    });
-
-    emit({ type: "step", step: 3, label: "Filter listings" });
-    emit({
-      type: "log",
-      message: `Filter check: dropped ${listings.filter.droppedReviews} for too many reviews, ${listings.filter.droppedWebsite} for website mismatch.`,
-    });
-    const places = listings.places;
-    if (places.length < parsed.targetCount) {
-      const msg = `Only ${places.length} businesses in ${parsed.city} matched both filters (you asked for ${parsed.targetCount}). Using the real count.`;
-      warnings.push(msg);
-      emit({ type: "log", message: msg });
-    } else {
-      emit({ type: "log", message: `Kept ${places.length} businesses that pass both filters.` });
-    }
-
-    if (!places.length) {
-      emit({ type: "done", leads: [], warnings, csvFilename: "" });
-      return;
-    }
-
-    emit({ type: "step", step: 4, label: "Read customer reviews" });
-    const reviewResult = await pullReviews({
-      token: settings.APIFY_API_TOKEN,
-      actorId: settings.APIFY_REVIEWS_ACTOR,
-      places,
-      onBatch: ({ batchNo, batchTotal, size }) => {
-        emit({
-          type: "progress",
-          current: batchNo,
-          total: batchTotal,
-          message: `Review batch ${batchNo} of ${batchTotal} (${size} businesses, up to 3 batches at once)…`,
-        });
-      },
-    });
-    warnings.push(...reviewResult.warnings);
-    for (const w of reviewResult.warnings) emit({ type: "log", message: w });
-
-    emit({ type: "step", step: 5, label: "Summarize reviews & find owners" });
-    const enriched = await enrichLeads({
-      places,
-      reviews: reviewResult.reviews,
+    const existingPhones = await loadExistingPhones();
+    const collected = await collectValidLeads({
       parsed,
       settings,
-      onPlace: ({ current, total, title }) => {
-        emit({
-          type: "progress",
-          current,
-          total,
-          message: `Enriching business ${current} of ${total}… ${title}`,
-        });
-      },
+      pool,
+      existingPhones,
+      emit: emitAll,
+      activeProvider: () => activeProvider,
     });
-    warnings.push(...enriched.warnings);
-    for (const w of enriched.warnings) emit({ type: "log", message: w });
+    warnings.push(...collected.warnings);
 
-    emit({ type: "step", step: 6, label: "Build the outreach list" });
-    const csvFilename = await saveCsv(enriched.leads);
-    emit({ type: "log", message: `Saved spreadsheet as ${csvFilename}` });
-    emit({ type: "done", leads: enriched.leads, warnings, csvFilename });
+    emitAll({ type: "step", step: 6, label: "Build the outreach list" });
+    const csvFilename = collected.leads.length ? await saveCsv(collected.leads) : "";
+    if (csvFilename) emitAll({ type: "log", message: `Saved spreadsheet as ${csvFilename}` });
+    emitAll({ type: "done", leads: collected.leads, warnings, csvFilename });
   } catch (err) {
-    emit({
+    emitAll({
       type: "error",
       message: err instanceof Error ? err.message : String(err),
     });
+  } finally {
+    pool.stop();
   }
 }

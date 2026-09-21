@@ -49,9 +49,6 @@ export function splitLocation(location: string): { city: string; state: string; 
     result = { address: location, city, state };
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7866/ingest/e617e1c7-3fd6-486a-a1f7-ae85faba0110',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9903e8'},body:JSON.stringify({sessionId:'9903e8',runId:'pre-fix',hypothesisId:'A',location:'lib/scraper-run.ts:splitLocation',message:'splitLocation result',data:{location,parts,city:result.city,state:result.state,looksLikeStreet:/^\d/.test(result.city)},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   return result;
 }
 

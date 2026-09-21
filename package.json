@@ -9,7 +9,8 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:wipe": "node prisma/wipe.js",
-    "db:seed": "node prisma/seed-plumbflow.js"
+    "db:seed": "node prisma/seed-plumbflow.js",
+    "test": "tsx --test features/finder/*.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

@@ -25,8 +25,14 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function asTargetCount(value: unknown, fallback = 50): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.floor(n);
+}
+
 function normalizeParsed(parsed: Record<string, unknown>): ParsedRequest {
-  const targetCount = Math.max(1, Math.min(500, Number(parsed.targetCount) || 50));
+  const targetCount = asTargetCount(parsed.targetCount, 50);
   const maxReviewsRaw = parsed.maxReviews;
   const maxReviews =
     maxReviewsRaw === null || maxReviewsRaw === undefined || maxReviewsRaw === ""
@@ -72,7 +78,7 @@ export function parseRequestLocally(prompt: string): ParsedRequest {
     city,
     maxReviews,
     websitePreference,
-    targetCount: Math.max(1, Math.min(500, targetCount)),
+    targetCount: asTargetCount(targetCount, 50),
   };
 }
 
@@ -83,7 +89,7 @@ Return ONLY JSON with these keys:
 - city: string (include state when given, e.g. "Houston, TX" or "Austin")
 - maxReviews: number or null (review-count upper limit; null if they did not specify)
 - websitePreference: "with" | "without" | "any"
-- targetCount: number of businesses they want (default 50 if missing)
+- targetCount: number of businesses they want (default 50 if missing). Use the user's number as-is — do not cap it.
 
 Rules:
 - "no website" / "without a website" / "don't have a website" => websitePreference "without"

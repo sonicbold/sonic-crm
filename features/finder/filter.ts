@@ -11,8 +11,9 @@ export type FilterStats = {
 };
 
 /**
- * Step 3 — Keep only listings that pass BOTH the review-count filter
- * and the website preference. Stop once we have the requested count.
+ * Step 3 — Keep every listing that passes BOTH the review-count filter
+ * and the website preference. Do not cap at targetCount: the scrape loop
+ * decides how many valid (enriched) leads to keep.
  */
 export function filterPlaces(places: MapPlace[], parsed: ParsedRequest): FilterStats {
   const kept: MapPlace[] = [];
@@ -36,13 +37,33 @@ export function filterPlaces(places: MapPlace[], parsed: ParsedRequest): FilterS
     }
 
     kept.push(place);
-    if (kept.length >= parsed.targetCount) break;
   }
 
   return { kept, droppedReviews, droppedWebsite };
 }
 
-/** Fetch extra listings so dual filters still leave enough leads. */
-export function oversampleCount(targetCount: number): number {
-  return Math.min(Math.max(targetCount * 3, targetCount + 50), 500);
+/** Fetch extra listings so dual filters still leave enough leads. Capped per Maps batch. */
+export function oversampleCount(needed: number): number {
+  const n = Math.max(1, Math.floor(needed));
+  return Math.min(Math.max(n * 3, n + 40), 400);
+}
+
+export function mapsQueryVariants(businessType: string): string[] {
+  const base = businessType.trim() || "businesses";
+  const variants = [
+    base,
+    `${base} company`,
+    `${base} contractor`,
+    `${base} services`,
+    `local ${base}`,
+  ];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of variants) {
+    const key = v.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+  }
+  return out;
 }
