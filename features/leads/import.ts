@@ -1,34 +1,17 @@
-﻿export const dynamic = 'force-dynamic';
+﻿export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/shared/db";
-import { ensureE164 } from "@/shared/utils";
+import { LeadImportError, runLeadImport } from "@/features/leads/import-run";
 
 export async function POST(req: NextRequest) {
   try {
-    const { leads } = await req.json();
-    if (!leads || !Array.isArray(leads)) return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
-
-    let imported = 0;
-    for (const row of leads) {
-      if (!row.phone) continue;
-      const normalizedPhone = ensureE164(row.phone);
-      try {
-        await prisma.lead.upsert({
-          where: { phone: normalizedPhone },
-          create: {
-            phone: normalizedPhone,
-            businessName: row.businessName || row.company || null,
-            name: row.name || null,
-            city: row.city || null,
-            source: "import"
-          },
-          update: {}
-        });
-        imported++;
-      } catch (e) { /* ignore duplicates */ }
+    const body = await req.json();
+    const result = await runLeadImport(body);
+    return NextResponse.json(result);
+  } catch (err) {
+    if (err instanceof LeadImportError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    return NextResponse.json({ imported, success: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Import failed";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

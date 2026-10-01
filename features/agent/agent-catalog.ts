@@ -14,7 +14,7 @@ export const AGENT_CATALOG = {
     { method: "GET", path: "/api/v1/stats", description: "Dashboard counts" },
     { method: "GET", path: "/api/v1/leads", description: "List leads. Query: search, status, archived (false|true|all), unenrolled, website (any|with|without), page, limit" },
     { method: "POST", path: "/api/v1/leads", description: "Create lead. Body: phone (required), name, businessName, city, email, website, notes" },
-    { method: "POST", path: "/api/v1/leads/import", description: "Bulk upsert. Body: { leads: [{ phone, businessName, name, city }] }" },
+    { method: "POST", path: "/api/v1/leads/import", description: "Gemini maps the file, then imports rows with company, phone, city or address, and website URL or explicit no-website. Skips toll-free and duplicate phones. Body: { csv } or { leads: [raw rows] }" },
     { method: "GET", path: "/api/v1/leads/:id", description: "Lead + recent messages + pending suggestion" },
     { method: "PATCH", path: "/api/v1/leads/:id", description: "Update fields: status, notes, archived, name, businessName, city, email, website, phone" },
     { method: "DELETE", path: "/api/v1/leads/:id", description: "Delete lead" },

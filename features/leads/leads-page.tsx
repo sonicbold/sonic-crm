@@ -22,35 +22,20 @@ export default function LeadsPage() {
     if (!file) return;
     setImporting(true);
     try {
-      const text = await file.text();
-      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-      
-      // Proper CSV parser that handles quoted values (e.g. "FlowBoost, Inc.")
-      function parseCSVLine(line: string): string[] {
-        const result: string[] = [];
-        let current = "";
-        let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-          const ch = line[i];
-          if (ch === '"') { inQuotes = !inQuotes; }
-          else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = ""; }
-          else { current += ch; }
-        }
-        result.push(current.trim());
-        return result;
-      }
-      
-      const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
-      const leads = lines.slice(1).map(line => {
-        const values = parseCSVLine(line);
-        const obj: any = {};
-        headers.forEach((h, i) => obj[h] = values[i]?.trim());
-        return obj;
+      const csv = await file.text();
+      const res = await fetch("/api/leads/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv, filename: file.name }),
       });
-      const res = await fetch("/api/leads/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leads }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast({ title: `Imported ${data.imported} leads!` });
+      if (!res.ok) throw new Error(data.error || "Import failed");
+      const skipped = Number(data.skipped || 0);
+      const summary = typeof data.summary === "string" ? data.summary.slice(0, 240) : "";
+      toast({
+        title: `Imported ${data.imported} lead${data.imported === 1 ? "" : "s"}`,
+        description: [skipped ? `Skipped ${skipped}` : null, summary].filter(Boolean).join(" — "),
+      });
       setRefreshKey(k => k + 1);
     } catch (err: any) {
       toast({ title: "Import failed", description: err.message, variant: "destructive" });
@@ -86,7 +71,7 @@ export default function LeadsPage() {
           </Button>
           <input type="file" accept=".csv" className="hidden" ref={fileRef} onChange={handleFileUpload} />
           <Button size="sm" className="rounded-xl h-10 bg-copper hover:bg-copper-hover text-white transition-all font-semibold" onClick={() => fileRef.current?.click()} disabled={importing}>
-            <Upload className="h-4 w-4 mr-2" />{importing ? "Importing..." : "Import CSV"}
+            <Upload className="h-4 w-4 mr-2" />{importing ? "Mapping with Gemini..." : "Import CSV"}
           </Button>
         </div>
       </div>
