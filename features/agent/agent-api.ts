@@ -8,6 +8,7 @@ import { reschedulePending, getCampaignProgress } from "@/features/campaigns/dri
 import { campaignTimezone, describePlan, nextWindowOpen } from "@/features/campaigns/drip-schedule";
 import { runScrapeJob } from "@/features/finder/scraper-run";
 import { AGENT_CATALOG } from "@/features/agent/agent-catalog";
+import { LeadImportError, runLeadImport } from "@/features/leads/import-run";
 
 const LEAD_PATCH = new Set([
   "name", "phone", "email", "businessName", "category", "city", "address",
@@ -54,26 +55,13 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
   }
 
   if (a === "leads" && b === "import" && method === "POST") {
-    const { leads } = await readBody(req);
-    if (!Array.isArray(leads)) return json({ error: "leads array required" }, 400);
-    let imported = 0;
-    for (const row of leads) {
-      if (!row?.phone) continue;
-      const phone = ensureE164(String(row.phone));
-      await prisma.lead.upsert({
-        where: { phone },
-        create: {
-          phone,
-          businessName: row.businessName || row.company || null,
-          name: row.name || null,
-          city: row.city || null,
-          source: "import",
-        },
-        update: {},
-      });
-      imported++;
+    try {
+      return json(await runLeadImport(await readBody(req)));
+    } catch (err) {
+      if (err instanceof LeadImportError) return json({ error: err.message }, err.status);
+      const message = err instanceof Error ? err.message : "Import failed";
+      return json({ error: message }, 500);
     }
-    return json({ imported, success: true });
   }
 
   if (a === "leads" && !b && method === "GET") {
