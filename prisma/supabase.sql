@@ -9,6 +9,7 @@ CREATE TABLE "Lead" (
     "city" TEXT,
     "address" TEXT,
     "website" TEXT,
+    "websiteStatus" TEXT,
     "rating" DOUBLE PRECISION,
     "reviewCount" INTEGER,
     "source" TEXT NOT NULL DEFAULT 'manual',
@@ -129,6 +130,7 @@ CREATE UNIQUE INDEX "Lead_phone_key" ON "Lead"("phone");
 
 -- CreateIndex
 CREATE INDEX "Lead_status_idx" ON "Lead"("status");
+CREATE INDEX "Lead_websiteStatus_idx" ON "Lead"("websiteStatus");
 
 -- CreateIndex
 CREATE INDEX "Lead_source_idx" ON "Lead"("source");
@@ -195,4 +197,23 @@ ALTER TABLE "Notification" ADD CONSTRAINT "Notification_leadId_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "SuggestedReply" ADD CONSTRAINT "SuggestedReply_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE IF NOT EXISTS "MapSearch" (
+    "id" TEXT NOT NULL,
+    "query" TEXT NOT NULL,
+    "location" TEXT NOT NULL,
+    "exhaustive" BOOLEAN NOT NULL DEFAULT false,
+    "resultCount" INTEGER NOT NULL DEFAULT 0,
+    "placesJson" TEXT NOT NULL,
+    "searchedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "MapSearch_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "MapSearch_query_location_key" ON "MapSearch"("query", "location");
+
+-- CreateIndex
+CREATE INDEX IF NOT EXISTS "MapSearch_searchedAt_idx" ON "MapSearch"("searchedAt");
 

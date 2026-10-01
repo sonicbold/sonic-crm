@@ -12,7 +12,7 @@ export const AGENT_CATALOG = {
     { method: "GET", path: "/api/v1/health", description: "Liveness + which integrations are configured" },
     { method: "GET", path: "/api/v1/brief", description: "Daily operator brief (Gemini). Query refresh=1 to regenerate" },
     { method: "GET", path: "/api/v1/stats", description: "Dashboard counts" },
-    { method: "GET", path: "/api/v1/leads", description: "List leads. Query: search, status, archived (false|true|all), unenrolled, website (any|with|without), page, limit" },
+    { method: "GET", path: "/api/v1/leads", description: "List leads. Query: search, status, archived (false|true|all), unenrolled, website (any|with|without|uncertain), page, limit. Each lead includes website (verified URL) and websiteStatus (has_website|no_website|uncertain)." },
     { method: "POST", path: "/api/v1/leads", description: "Create lead. Body: phone (required), name, businessName, city, email, website, notes" },
     { method: "POST", path: "/api/v1/leads/import", description: "Bulk upsert. Body: { leads: [{ phone, businessName, name, city }] }" },
     { method: "GET", path: "/api/v1/leads/:id", description: "Lead + recent messages + pending suggestion" },
@@ -33,7 +33,7 @@ export const AGENT_CATALOG = {
     { method: "POST", path: "/api/v1/campaigns/:id/enroll", description: "Queue leads. Body: { leadIds: string[], count? }" },
     { method: "POST", path: "/api/v1/campaigns/:id/control", description: "Body: { action: pause|resume|stop }" },
     { method: "GET", path: "/api/v1/campaigns/:id/progress", description: "Drip queue progress" },
-    { method: "POST", path: "/api/v1/scrape", description: "Run Finder Maps pipeline and save leads. Body: { prompt: 'Find 25 plumbers in Houston TX, under 150 reviews' }" },
+    { method: "POST", path: "/api/v1/scrape", description: "Run Canvass across plumber cities (Maps + owner names) and save new leads. No prompt needed." },
     { method: "GET", path: "/api/v1/jobs", description: "Scrape job history" },
   ],
 };

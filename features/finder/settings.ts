@@ -1,20 +1,23 @@
+/** Finder AI/Apify keys. Stored via shared/settings; defaults/retired models live here. */
 import { getConfig, saveSettings as saveCrmSettings } from "@/shared/settings";
 import type { AppSettings, SettingsStatus } from "./types";
 
 const DEFAULTS: AppSettings = {
   GEMINI_API_KEY: "",
+  GEMINI_API_KEY_2: "",
+  GEMINI_API_KEY_3: "",
   APIFY_API_TOKEN: "",
   GROQ_API_KEY_1: "",
   GROQ_API_KEY_2: "",
-  OPENROUTER_API_KEY: "",
+  GROQ_API_KEY_3: "",
   APIFY_MAPS_ACTOR: "kaix/google-maps-places-scraper",
   APIFY_REVIEWS_ACTOR: "kaix/google-maps-reviews-scraper",
-  GEMINI_MODEL: "gemini-3.6-flash",
-  GROQ_MODEL: "openai/gpt-oss-20b",
-  OPENROUTER_MODEL: "openrouter/free",
+  GEMINI_MODEL: "gemini-3.8-flash",
+  GROQ_MODEL: "openai/gpt-oss-120b",
 };
 
 const RETIRED_GEMINI_MODELS = new Set([
+  "gemini-2.5-flash",
   "gemini-2.0-flash",
   "gemini-2.0-flash-001",
   "gemini-1.5-flash",
@@ -53,15 +56,16 @@ export async function loadSettings(): Promise<AppSettings> {
   const cfg = await getConfig();
   return {
     GEMINI_API_KEY: cfg.GEMINI_API_KEY,
+    GEMINI_API_KEY_2: cfg.GEMINI_API_KEY_2,
+    GEMINI_API_KEY_3: cfg.GEMINI_API_KEY_3,
     APIFY_API_TOKEN: cfg.APIFY_API_TOKEN,
     GROQ_API_KEY_1: cfg.GROQ_API_KEY_1,
     GROQ_API_KEY_2: cfg.GROQ_API_KEY_2,
-    OPENROUTER_API_KEY: cfg.OPENROUTER_API_KEY,
+    GROQ_API_KEY_3: cfg.GROQ_API_KEY_3,
     APIFY_MAPS_ACTOR: currentMapsActor(cfg.APIFY_MAPS_ACTOR),
     APIFY_REVIEWS_ACTOR: currentReviewsActor(cfg.APIFY_REVIEWS_ACTOR),
     GEMINI_MODEL: currentGeminiModel(cfg.GEMINI_MODEL || DEFAULTS.GEMINI_MODEL),
     GROQ_MODEL: currentGroqModel(cfg.GROQ_MODEL || DEFAULTS.GROQ_MODEL),
-    OPENROUTER_MODEL: cfg.OPENROUTER_MODEL || DEFAULTS.OPENROUTER_MODEL,
   };
 }
 
@@ -73,24 +77,24 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<AppSe
 export function settingsStatus(settings: AppSettings): SettingsStatus {
   return {
     gemini: Boolean(settings.GEMINI_API_KEY),
+    gemini2: Boolean(settings.GEMINI_API_KEY_2),
+    gemini3: Boolean(settings.GEMINI_API_KEY_3),
     apify: Boolean(settings.APIFY_API_TOKEN),
     groq1: Boolean(settings.GROQ_API_KEY_1),
     groq2: Boolean(settings.GROQ_API_KEY_2),
-    openrouter: Boolean(settings.OPENROUTER_API_KEY),
+    groq3: Boolean(settings.GROQ_API_KEY_3),
     mapsActor: settings.APIFY_MAPS_ACTOR,
     reviewsActor: settings.APIFY_REVIEWS_ACTOR,
     geminiModel: settings.GEMINI_MODEL,
     groqModel: settings.GROQ_MODEL,
-    openrouterModel: settings.OPENROUTER_MODEL,
   };
 }
 
 export function assertReady(settings: AppSettings) {
   const missing: string[] = [];
-  if (!settings.GEMINI_API_KEY) missing.push("Gemini API key");
   if (!settings.APIFY_API_TOKEN) missing.push("Apify API token");
-  if (!settings.GROQ_API_KEY_1 && !settings.GROQ_API_KEY_2 && !settings.OPENROUTER_API_KEY) {
-    missing.push("at least one Groq or OpenRouter API key");
+  if (!settings.GROQ_API_KEY_1 && !settings.GROQ_API_KEY_2 && !settings.GROQ_API_KEY_3) {
+    missing.push("a Groq API key for owner names");
   }
   if (missing.length) {
     throw new Error(`Add these in Settings before running: ${missing.join(", ")}.`);

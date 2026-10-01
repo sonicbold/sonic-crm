@@ -4,6 +4,8 @@ services:
   crm:
     environment:
       DATABASE_URL: "file:/app/data/dev.db"
+      SONIC_DEBUG: "*"
+      FINDER_LEAD_CAP: "10"
     volumes:
       - full_crm_data:/app/data
 

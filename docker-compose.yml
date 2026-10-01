@@ -22,10 +22,13 @@ services:
       TELNYX_PUBLIC_KEY: ${TELNYX_PUBLIC_KEY:-}
       TELNYX_MESSAGING_PROFILE_ID: ${TELNYX_MESSAGING_PROFILE_ID:-}
       APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
-      GROQ_API_KEY_1: ${GROQ_API_KEY_1:-}
-      GROQ_API_KEY_2: ${GROQ_API_KEY_2:-}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      FINDER_MAX_MAP_CALLS: ${FINDER_MAX_MAP_CALLS:-3}
+      FINDER_CITY_SATURATION: ${FINDER_CITY_SATURATION:-40}
+      FINDER_LEAD_CAP: ${FINDER_LEAD_CAP:-10}
       CRM_API_KEY: ${CRM_API_KEY:-}
+      # JSON logs: docker logs -f full-crm
+      # Debug lines: SONIC_DEBUG=1 (all) or SONIC_DEBUG=finder,leads,campaigns,inbox
+      SONIC_DEBUG: ${SONIC_DEBUG:-}
     restart: unless-stopped
 
   drip:

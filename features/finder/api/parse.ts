@@ -1,8 +1,10 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
+import { describeSearch } from "@/features/finder/niche";
 import { loadSettings } from "@/features/finder/settings";
 import { parseRequest } from "@/features/finder/workflows/parseRequest";
 import type { ParsedRequest } from "@/features/finder/types";
+import { jsonError } from "@/shared/route";
 
 function toInterpretation(parsed: ParsedRequest) {
   const website =
@@ -17,7 +19,7 @@ function toInterpretation(parsed: ParsedRequest) {
     locations: [parsed.city],
     limit: parsed.targetCount,
     filters: {
-      minReviews: null,
+      minReviews: parsed.minReviews,
       maxReviews: parsed.maxReviews,
       minRating: null,
       maxRating: null,
@@ -26,36 +28,24 @@ function toInterpretation(parsed: ParsedRequest) {
       businessStatus: "operational",
     },
     segments: 1,
-    explanation: `Looking for ${parsed.targetCount} ${parsed.businessType} in ${parsed.city}${
-      parsed.maxReviews !== null ? `, under ${parsed.maxReviews} reviews` : ""
-    }, website: ${parsed.websitePreference}.`,
+    explanation: describeSearch(parsed),
     parsed,
   };
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const { prompt } = await req.json();
-    if (!prompt || typeof prompt !== "string") {
-      return NextResponse.json({ error: "Search prompt is required" }, { status: 400 });
-    }
-    const settings = await loadSettings();
-    if (!settings.GEMINI_API_KEY) {
-      return NextResponse.json(
-        { error: "Add a Gemini API key in Settings before interpreting a search." },
-        { status: 400 },
-      );
-    }
-    const parsed = await parseRequest({
-      prompt,
-      apiKey: settings.GEMINI_API_KEY,
-      model: settings.GEMINI_MODEL,
-    });
-    return NextResponse.json(toInterpretation(parsed));
-  } catch (err: unknown) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to parse prompt" },
-      { status: 500 },
-    );
+  const { prompt } = await req.json();
+  if (!prompt || typeof prompt !== "string") {
+    return jsonError("finder.parse", "Search prompt is required", 400);
   }
+  const settings = await loadSettings();
+  if (!settings.GEMINI_API_KEY) {
+    return jsonError("finder.parse", "Add a Gemini API key in Settings before interpreting a search.", 400);
+  }
+  const parsed = await parseRequest({
+    prompt,
+    apiKey: settings.GEMINI_API_KEY,
+    model: settings.GEMINI_MODEL,
+  });
+  return NextResponse.json(toInterpretation(parsed));
 }

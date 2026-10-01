@@ -2,10 +2,13 @@
 
 export type WebsitePreference = "with" | "without" | "any";
 
-/** What Gemini extracted from the user's natural-language request. */
+/** Structured Finder search for one city. */
 export type ParsedRequest = {
   businessType: string;
   city: string;
+  /** Keep listings with at least this many reviews. Null means no floor. */
+  minReviews: number | null;
+  /** Drop listings with this many reviews or more. Null means no cap. */
   maxReviews: number | null;
   websitePreference: WebsitePreference;
   targetCount: number;
@@ -18,9 +21,14 @@ export type MapPlace = {
   address: string;
   website: string | null;
   reviewsCount: number;
+  /** Google star rating, when the Maps result includes one. */
+  rating: number | null;
   url: string;
   placeId: string;
+  category?: string;
   listedOwnerName?: string;
+  /** Reviews were read and no personal name was written. Do not buy them again. */
+  ownerChecked?: boolean;
 };
 
 export type Review = {
@@ -41,6 +49,7 @@ export type Lead = {
   profileUrl: string;
   summary: string;
   reviewsCount: number;
+  rating: number | null;
   note?: string;
 };
 
@@ -51,6 +60,18 @@ export type FinderStatus = {
   remaining: number;
   aiProvider: string;
   nextRequestInMs: number;
+  mapsPaidCalls?: number;
+  mapsCacheHits?: number;
+  crmDuplicates?: number;
+  newLeads?: number;
+  leadCap?: number | null;
+  nameRatePct?: number;
+  nameDetectNamed?: number;
+  nameDetectWithReviews?: number;
+  websitePct?: number;
+  noWebsitePct?: number;
+  withWebsite?: number;
+  noWebsite?: number;
 };
 
 export type PipelineEvent =
@@ -64,33 +85,55 @@ export type PipelineEvent =
       remaining?: number;
       aiProvider?: string;
       nextRequestInMs?: number;
+      mapsPaidCalls?: number;
+      mapsCacheHits?: number;
+      crmDuplicates?: number;
+      newLeads?: number;
+      leadCap?: number | null;
+      nameRatePct?: number;
+      nameDetectNamed?: number;
+      nameDetectWithReviews?: number;
+      websitePct?: number;
+      noWebsitePct?: number;
+      withWebsite?: number;
+      noWebsite?: number;
     }
   | { type: "parsed"; parsed: ParsedRequest }
-  | { type: "done"; leads: Lead[]; warnings: string[]; csvFilename: string }
+  | {
+      type: "done";
+      leads: Lead[];
+      warnings: string[];
+      csvFilename: string;
+      spendLog?: string;
+      paused?: boolean;
+      hitLeadCap?: boolean;
+    }
   | { type: "error"; message: string };
 
 export type AppSettings = {
   GEMINI_API_KEY: string;
+  GEMINI_API_KEY_2: string;
+  GEMINI_API_KEY_3: string;
   APIFY_API_TOKEN: string;
   GROQ_API_KEY_1: string;
   GROQ_API_KEY_2: string;
-  OPENROUTER_API_KEY: string;
+  GROQ_API_KEY_3: string;
   APIFY_MAPS_ACTOR: string;
   APIFY_REVIEWS_ACTOR: string;
   GEMINI_MODEL: string;
   GROQ_MODEL: string;
-  OPENROUTER_MODEL: string;
 };
 
 export type SettingsStatus = {
   gemini: boolean;
+  gemini2: boolean;
+  gemini3: boolean;
   apify: boolean;
   groq1: boolean;
   groq2: boolean;
-  openrouter: boolean;
+  groq3: boolean;
   mapsActor: string;
   reviewsActor: string;
   geminiModel: string;
   groqModel: string;
-  openrouterModel: string;
 };

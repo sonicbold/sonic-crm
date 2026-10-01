@@ -4,6 +4,8 @@ import { prisma } from "@/shared/db";
 import { verifyTelnyxSignature, mapTelnyxStatus } from "@/features/inbox/telnyx";
 import { phoneLookupValues } from "@/shared/utils";
 import { handleInboundSms } from "@/features/inbox/inbound";
+import { jsonError } from "@/shared/route";
+import { logger } from "@/shared/log";
 
 type TelnyxEvent = {
   data?: {
@@ -27,7 +29,7 @@ export async function POST(req: NextRequest) {
     const rawBody = await req.text();
     if (process.env.NODE_ENV !== "development") {
       if (!(await verifyTelnyxSignature(req, rawBody))) {
-        return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+        return jsonError("inbox.webhook", "invalid signature", 401);
       }
     }
 
@@ -35,7 +37,7 @@ export async function POST(req: NextRequest) {
     try {
       event = JSON.parse(rawBody) as TelnyxEvent;
     } catch {
-      return NextResponse.json({ error: "invalid json" }, { status: 400 });
+      return jsonError("inbox.webhook", "invalid json", 400);
     }
 
     const eventType = event.data?.event_type || "";
@@ -61,6 +63,7 @@ export async function POST(req: NextRequest) {
       });
 
       await handleInboundSms(lead.id, inboundMsg.id, body);
+      logger("inbox.webhook").info("inbound stored", { leadId: lead.id, eventType });
       return ok();
     }
 
@@ -71,7 +74,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (err) {
-    console.error("Webhook critical error:", err);
+    logger("inbox.webhook").error("webhook failed", { err });
   }
   return ok();
 }

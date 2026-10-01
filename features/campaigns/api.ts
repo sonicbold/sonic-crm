@@ -1,6 +1,11 @@
-﻿export const dynamic = "force-dynamic";
+﻿/**
+ * Campaign CRUD. Enroll/pause/progress live in enroll.ts, control.ts, progress.ts.
+ * Drip sends are campaigns/drip-runner.ts (cron hits /api/cron/drip).
+ */
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/shared/db";
+import { jsonError } from "@/shared/route";
 
 export async function GET() {
   const campaigns = await prisma.campaign.findMany({
@@ -41,7 +46,7 @@ export async function POST(req: NextRequest) {
   const { name, description, message, messageA, messageB, status = "draft" } = await req.json();
   const first = String(messageA || message || "").trim();
   const second = String(messageB || "").trim();
-  if (!name || !first) return NextResponse.json({ error: "Name and message required" }, { status: 400 });
+  if (!name || !first) return jsonError("campaigns", "Name and message required", 400);
 
   const campaign = await prisma.campaign.create({
     data: { name, description, steps: JSON.stringify([{ message: first }, ...(second ? [{ message: second }] : [])]), status },
@@ -51,7 +56,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const { id, message, name, description } = await req.json();
-  if (!id) return NextResponse.json({ error: "ID required" }, { status: 400 });
+  if (!id) return jsonError("campaigns", "ID required", 400);
   const campaign = await prisma.campaign.update({
     where: { id },
     data: {
@@ -65,11 +70,7 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   const id = new URL(req.url).searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "ID required" }, { status: 400 });
-  try {
-    await prisma.campaign.delete({ where: { id } });
-    return NextResponse.json({ success: true });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Failed to delete campaign" }, { status: 500 });
-  }
+  if (!id) return jsonError("campaigns", "ID required", 400);
+  await prisma.campaign.delete({ where: { id } });
+  return NextResponse.json({ success: true });
 }

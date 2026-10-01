@@ -110,7 +110,7 @@ export function CampaignBuilder({ onCancel, onSave }: Props) {
       <div className="space-y-2 pt-2 border-t border-border">
         <Label>Who to text</Label>
         <p className="text-xs text-muted-foreground">
-          Pick <strong>No website</strong> or <strong>Has website</strong> (same split as Finder), then check the businesses. Those already in a drip stay locked.
+          Filter by website status, then check the businesses. Has Website and No Website stay separate. Uncertain leads are left out of both. Those already in a drip stay locked.
         </p>
         <CampaignLeadPicker selected={selectedLeads} onSelectedChange={setSelectedLeads} />
       </div>

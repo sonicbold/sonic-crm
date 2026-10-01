@@ -3,6 +3,9 @@ import { classifyReply, declineMessage, suggestInterestedReply } from "@/shared/
 import { sendSMS } from "@/features/inbox/telnyx";
 import { getConfig } from "@/shared/settings";
 import { ensureE164 } from "@/shared/utils";
+import { logger } from "@/shared/log";
+
+const log = logger("inbox");
 
 const DECLINE_INTENTS = new Set(["not_interested", "opted_out"]);
 
@@ -19,7 +22,7 @@ export async function handleInboundSms(leadId: string, inboundId: string, body: 
     confidence = classified.confidence;
     reason = classified.reason;
   } catch (e) {
-    console.error("Gemini classify failed:", e);
+    log.error("Gemini classify failed", { err: e, leadId });
   }
 
   const isInterested = intent === "interested";
@@ -47,7 +50,7 @@ export async function handleInboundSms(leadId: string, inboundId: string, body: 
         },
       });
     } catch (e) {
-      console.error("Decline SMS failed:", e);
+      log.error("Decline SMS failed", { err: e, leadId: lead.id });
     }
 
     await prisma.lead.update({
@@ -86,7 +89,7 @@ export async function handleInboundSms(leadId: string, inboundId: string, body: 
   try {
     suggestion = await suggestInterestedReply(body, lead, history);
   } catch (e) {
-    console.error("Gemini suggest failed:", e);
+    log.error("Gemini suggest failed", { err: e, leadId: lead.id });
   }
 
   await prisma.suggestedReply.updateMany({
@@ -125,7 +128,7 @@ export async function handleInboundSms(leadId: string, inboundId: string, body: 
         `Sonic CRM: ${lead.businessName || lead.phone} replied (${isInterested ? "interested" : "review"}). Open Inbox to send.`
       );
     } catch (e) {
-      console.error("Owner notify SMS failed:", e);
+      log.error("Owner notify SMS failed", { err: e, leadId: lead.id });
     }
   }
 }

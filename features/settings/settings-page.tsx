@@ -9,15 +9,17 @@ import { Key, Bot, CheckCircle2, XCircle, Copy } from "lucide-react";
 import { toast } from "@/shared/ui/use-toast";
 
 const FIELDS: { key: string; label: string; hint: string; placeholder: string }[] = [
-  { key: "GEMINI_API_KEY", label: "Google Gemini API key", hint: "AI Studio key. Used to classify replies and draft SMS.", placeholder: "AIza..." },
+  { key: "GEMINI_API_KEY", label: "Gemini API key 1", hint: "gemini-3.8-flash. Canvass review summaries + inbound SMS.", placeholder: "AIza..." },
+  { key: "GEMINI_API_KEY_2", label: "Gemini API key 2", hint: "gemini-3.6-flash. Extra Canvass review-summary capacity.", placeholder: "AIza..." },
+  { key: "GEMINI_API_KEY_3", label: "Gemini API key 3", hint: "gemini-3.5-flash. Extra Canvass review-summary capacity.", placeholder: "AIza..." },
   { key: "TELNYX_API_KEY", label: "Telnyx API key", hint: "Sends and receives SMS.", placeholder: "KEY..." },
   { key: "TELNYX_PHONE_NUMBER", label: "Telnyx from-number", hint: "E.164, e.g. +1...", placeholder: "+1..." },
   { key: "TELNYX_PUBLIC_KEY", label: "Telnyx public key (optional)", hint: "Webhook signature verification.", placeholder: "base64..." },
   { key: "TELNYX_MESSAGING_PROFILE_ID", label: "Telnyx messaging profile (optional)", hint: "If your number is on a profile.", placeholder: "uuid" },
   { key: "APIFY_API_TOKEN", label: "Apify API token", hint: "Finder Maps + reviews scraper.", placeholder: "apify_api_..." },
-  { key: "GROQ_API_KEY_1", label: "Groq API key 1", hint: "Review summaries and owner names.", placeholder: "gsk_..." },
-  { key: "GROQ_API_KEY_2", label: "Groq API key 2 (optional)", hint: "Fallback Groq account.", placeholder: "gsk_..." },
-  { key: "OPENROUTER_API_KEY", label: "OpenRouter API key (optional)", hint: "Fallback if Groq is busy.", placeholder: "sk-or-..." },
+  { key: "GROQ_API_KEY_1", label: "Groq API key 1", hint: "openai/gpt-oss-120b. Owner names from reviews. Load is split across Groq keys.", placeholder: "gsk_..." },
+  { key: "GROQ_API_KEY_2", label: "Groq API key 2", hint: "Same model. Extra RPM for name detection.", placeholder: "gsk_..." },
+  { key: "GROQ_API_KEY_3", label: "Groq API key 3", hint: "Same model. Extra RPM for name detection.", placeholder: "gsk_..." },
   { key: "NOTIFY_PHONE", label: "Notify my phone (optional)", hint: "Get a text when someone is interested.", placeholder: "+1..." },
   { key: "CRM_TIMEZONE", label: "Timezone", hint: "Strategic Drip window 9 AM–7 PM.", placeholder: "America/New_York" },
 ];
@@ -28,7 +30,6 @@ export default function SettingsPage() {
     telnyx: false,
     apify: false,
     groq: false,
-    openrouter: false,
     finder: false,
     notify: false,
     ready: false,
@@ -115,15 +116,14 @@ export default function SettingsPage() {
             <Bot className="h-4 w-4 text-teal-bright" />
             <CardTitle className="text-sm font-mono uppercase tracking-widest text-muted-foreground font-semibold">Live status</CardTitle>
           </div>
-          <CardDescription className="text-xs mt-1">Gemini classifies replies. Finder uses Gemini + Apify + Groq. Telnyx sends SMS.</CardDescription>
+          <CardDescription className="text-xs mt-1">Gemini classifies replies. Finder uses Apify Maps plus Groq GPT-OSS 120B for owner names. Telnyx sends SMS.</CardDescription>
         </CardHeader>
         <CardContent className="px-6 py-4 space-y-2">
           {[
             ["Google Gemini", status.gemini],
             ["Telnyx SMS", status.telnyx],
             ["Finder / Apify", status.apify],
-            ["Groq summaries", status.groq],
-            ["OpenRouter fallback", status.openrouter],
+            ["Groq GPT-OSS 120B", status.groq],
             ["Owner notify SMS", status.notify],
             ["Agent API key", status.agentApi],
           ].map(([label, ok]) => (

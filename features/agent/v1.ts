@@ -1,16 +1,13 @@
+/** External agent API under /api/v1. Auth is shared/api-auth.ts; handlers in agent-api.ts. */
 export const dynamic = "force-dynamic";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { requireAgentKey } from "@/shared/api-auth";
 import { handleAgentRequest } from "@/features/agent/agent-api";
 
 async function run(req: NextRequest, method: string) {
   const denied = await requireAgentKey(req);
   if (denied) return denied;
-  try {
-    return await handleAgentRequest(req, method);
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Agent API error" }, { status: 500 });
-  }
+  return handleAgentRequest(req, method);
 }
 
 export async function GET(req: NextRequest) {

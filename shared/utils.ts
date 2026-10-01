@@ -1,5 +1,6 @@
 ﻿import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { classifyWebsite } from "@/shared/website-status";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -54,23 +55,17 @@ export function toHttpUrl(value: string | null | undefined): string | null {
   return `https://${v}`;
 }
 
-export function leadHasWebsite(website?: string | null): boolean {
-  return Boolean(toHttpUrl(website));
+export function leadHasWebsite(website?: string | null, status?: string | null): boolean {
+  if (status) return status === "has_website";
+  return classifyWebsite(website).websiteStatus === "has_website";
 }
 
-/** Prisma where-clause matching Finder: real site vs missing / "No link". */
+/** Campaign and lead-list filter. Uncertain leads are excluded from both website audiences. */
 export function websitePrismaWhere(filter: string | null | undefined): Record<string, unknown> {
-  if (filter !== "with" && filter !== "without") return {};
-  const missing = {
-    OR: [
-      { website: null },
-      { website: "" },
-      { website: "No link" },
-      { website: "no link" },
-      { website: "No Link" },
-    ],
-  };
-  return filter === "without" ? missing : { NOT: missing };
+  if (filter === "with") return { websiteStatus: "has_website" };
+  if (filter === "without") return { websiteStatus: "no_website" };
+  if (filter === "uncertain") return { websiteStatus: "uncertain" };
+  return {};
 }
 
 export function businessLink(opts: {

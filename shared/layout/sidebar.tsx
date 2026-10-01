@@ -7,7 +7,7 @@ import { cn } from "@/shared/utils";
 const nav = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/leads", label: "Database", icon: Users },
-  { href: "/scraper", label: "Lead Scraper", icon: Search },
+  { href: "/scraper", label: "Canvass", icon: Search },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/reports", label: "Reports", icon: BarChart3 },

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/shared/db";
 import { ensureE164, websitePrismaWhere } from "@/shared/utils";
+import { websiteFields } from "@/shared/website-status";
+import { backfillWebsiteStatuses } from "@/features/leads/website-backfill";
 import { getConfig, configStatus } from "@/shared/settings";
 import { sendSMS } from "@/features/inbox/telnyx";
 import { parseCampaignMessage } from "@/shared/utils";
@@ -15,6 +17,9 @@ const LEAD_PATCH = new Set([
 ]);
 
 function json(data: unknown, status = 200) {
+  if (data && typeof data === "object" && data !== null && "error" in data && !("feature" in data)) {
+    return NextResponse.json({ ...(data as Record<string, unknown>), feature: "agent" }, { status });
+  }
   return NextResponse.json(data, { status });
 }
 
@@ -67,6 +72,7 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
           businessName: row.businessName || row.company || null,
           name: row.name || null,
           city: row.city || null,
+          ...websiteFields(row.website || row.url || row.site),
           source: "import",
         },
         update: {},
@@ -100,6 +106,7 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
           }
         : {}),
     };
+    await backfillWebsiteStatuses();
     const [data, total] = await Promise.all([
       prisma.lead.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit }),
       prisma.lead.count({ where }),
@@ -119,7 +126,7 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
           businessName: body.businessName || null,
           category: body.category || null,
           city: body.city || null,
-          website: body.website || null,
+          ...websiteFields(body.website),
           notes: body.notes || null,
           source: "manual",
           status: "new",
@@ -151,6 +158,7 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
       if (LEAD_PATCH.has(k)) data[k] = v;
     }
     if (typeof data.phone === "string") data.phone = ensureE164(data.phone);
+    if ("website" in data) Object.assign(data, websiteFields(typeof data.website === "string" ? data.website : null));
     if (data.archived === true) data.archivedAt = new Date();
     if (data.archived === false) data.archivedAt = null;
     try {
@@ -194,22 +202,18 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
     if (!lead?.phone) return json({ error: "Lead not found" }, 404);
     const cfg = await getConfig();
     if (!cfg.TELNYX_API_KEY || !cfg.TELNYX_PHONE_NUMBER) return json({ error: "Telnyx is not configured" }, 400);
-    try {
-      const { sid, status } = await sendSMS(ensureE164(lead.phone), message);
-      const msg = await prisma.message.create({
-        data: { leadId, direction: "outbound", body: message, twilioSid: sid, status: "queued" },
-      });
-      await prisma.lead.update({
-        where: { id: leadId },
-        data: { status: lead.status === "new" ? "contacted" : lead.status },
-      });
-      if (suggestionId) {
-        await prisma.suggestedReply.updateMany({ where: { id: suggestionId, leadId }, data: { status: "sent" } });
-      }
-      return json({ success: true, messageId: msg.id, providerSid: sid, status });
-    } catch (e) {
-      return json({ error: e instanceof Error ? e.message : "SMS failed" }, 500);
+    const { sid, status } = await sendSMS(ensureE164(lead.phone), message);
+    const msg = await prisma.message.create({
+      data: { leadId, direction: "outbound", body: message, twilioSid: sid, status: "queued" },
+    });
+    await prisma.lead.update({
+      where: { id: leadId },
+      data: { status: lead.status === "new" ? "contacted" : lead.status },
+    });
+    if (suggestionId) {
+      await prisma.suggestedReply.updateMany({ where: { id: suggestionId, leadId }, data: { status: "sent" } });
     }
+    return json({ success: true, messageId: msg.id, providerSid: sid, status });
   }
 
   if (a === "replies" && method === "GET") {
@@ -345,9 +349,7 @@ export async function handleAgentRequest(req: NextRequest, method: string) {
   }
 
   if (a === "scrape" && method === "POST") {
-    const { prompt } = await readBody(req);
-    if (!prompt) return json({ error: "prompt required, e.g. Find 25 plumbers in Houston TX, under 150 reviews" }, 400);
-    return runScrapeJob(String(prompt));
+    return runScrapeJob();
   }
 
   if (a === "jobs" && method === "GET") {

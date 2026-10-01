@@ -17,6 +17,7 @@ model Lead {
   city          String?
   address       String?
   website       String?
+  websiteStatus String? // has_website | no_website | uncertain
   rating        Float?
   reviewCount   Int?
   source        String    @default("manual") // ai_scraper | outscraper | manual | import
@@ -24,6 +25,7 @@ model Lead {
   state         String?
   googleMapsUrl String?
   notes         String?
+  internalNotes String? // freeform pad; not Finder review text
   replied       Boolean   @default(false)
   archived      Boolean   @default(false)
   archivedAt    DateTime?
@@ -40,6 +42,7 @@ model Lead {
   suggestedReplies SuggestedReply[]
 
   @@index([status])
+  @@index([websiteStatus])
   @@index([source])
   @@index([searchJobId])
   @@index([createdAt])
@@ -139,6 +142,20 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([read, createdAt])
+}
+
+/// One paid Google Maps search. Later runs reuse placesJson instead of calling Apify again.
+model MapSearch {
+  id          String   @id @default(cuid())
+  query       String
+  location    String
+  exhaustive  Boolean  @default(false)
+  resultCount Int      @default(0)
+  placesJson  String
+  searchedAt  DateTime @default(now())
+
+  @@unique([query, location])
+  @@index([searchedAt])
 }
 
 model SuggestedReply {

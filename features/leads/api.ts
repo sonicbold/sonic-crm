@@ -1,8 +1,16 @@
+/**
+ * Leads list/create/edit/archive. Import is features/leads/import.ts.
+ * Phone uniqueness is the CRM identity — do not drop the E.164 + unique checks.
+ */
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/shared/db";
 import { z } from "zod";
 import { ensureE164, websitePrismaWhere } from "@/shared/utils";
+import { websiteFields } from "@/shared/website-status";
+import { backfillWebsiteStatuses } from "@/features/leads/website-backfill";
+import { logger } from "@/shared/log";
+import { jsonError } from "@/shared/route";
 
 const CreateLeadSchema = z.object({
   name: z.string().optional().nullable(),
@@ -16,6 +24,23 @@ const CreateLeadSchema = z.object({
   reviewCount: z.number().int().optional().nullable(),
   address: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
+});
+
+const UpdateLeadSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional().nullable(),
+  phone: z.string().min(7).optional(),
+  email: z.string().optional().nullable(),
+  businessName: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  state: z.string().optional().nullable(),
+  address: z.string().optional().nullable(),
+  website: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  status: z.enum(["new", "contacted", "interested", "not_interested", "closed"]).optional(),
+  googleMapsUrl: z.string().optional().nullable(),
+  rating: z.number().optional().nullable(),
+  reviewCount: z.number().int().optional().nullable(),
 });
 
 function emptyToNull(value: string | null | undefined) {
@@ -56,6 +81,7 @@ export async function GET(req: NextRequest) {
     };
 
     const picker = searchParams.get("picker") === "true";
+    await backfillWebsiteStatuses();
 
     const [data, total] = await Promise.all([
       prisma.lead.findMany({
@@ -82,24 +108,27 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ data, total, page, limit });
   } catch (err: unknown) {
+    logger("leads").error("load failed", { err });
     const msg = err instanceof Error ? err.message : "Failed to load leads";
-    return NextResponse.json({ error: msg, data: [], total: 0 }, { status: 500 });
+    return jsonError("leads", msg, 500, { data: [], total: 0 });
   }
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const parsed = CreateLeadSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "Check phone and email fields", details: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success) return jsonError("leads", "Check phone and email fields", 400, { details: parsed.error.flatten() });
 
   try {
     const email = emptyToNull(parsed.data.email);
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+      return jsonError("leads", "Invalid email", 400);
     }
+    const site = websiteFields(parsed.data.website);
     const lead = await prisma.lead.create({
       data: {
         ...parsed.data,
+        ...site,
         email,
         phone: ensureE164(parsed.data.phone),
         source: "manual",
@@ -109,24 +138,57 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(lead, { status: 201 });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Error";
-    if (msg.includes("Unique") || msg.toLowerCase().includes("unique")) {
-      return NextResponse.json({ error: "Phone number already exists" }, { status: 409 });
-    }
-    return NextResponse.json({ error: msg }, { status: 500 });
+    if (/unique/i.test(msg)) return jsonError("leads", "Phone number already exists", 409);
+    throw e;
   }
 }
 
 export async function PATCH(req: NextRequest) {
-  const { id, ...data } = await req.json();
-  if (!id) return NextResponse.json({ error: "ID required" }, { status: 400 });
-  if (typeof data.phone === "string") data.phone = ensureE164(data.phone);
-  const lead = await prisma.lead.update({ where: { id }, data });
-  return NextResponse.json(lead);
+  const body = await req.json();
+  const parsed = UpdateLeadSchema.safeParse(body);
+  if (!parsed.success) {
+    return jsonError("leads", "Check the lead fields", 400, { details: parsed.error.flatten() });
+  }
+  const { id, ...patch } = parsed.data;
+  if (typeof patch.phone === "string") patch.phone = ensureE164(patch.phone);
+  if ("email" in patch) patch.email = emptyToNull(patch.email);
+  if ("website" in patch) Object.assign(patch, websiteFields(patch.website));
+  try {
+    const lead = await prisma.lead.update({ where: { id }, data: patch });
+    return NextResponse.json(lead);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Error";
+    if (/unique/i.test(msg)) return jsonError("leads", "Phone number already exists", 409);
+    throw e;
+  }
 }
 
 export async function DELETE(req: NextRequest) {
-  const id = new URL(req.url).searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "ID required" }, { status: 400 });
-  await prisma.lead.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  const url = new URL(req.url);
+  const singleId = url.searchParams.get("id");
+  const idsParam = url.searchParams.get("ids");
+
+  let ids: string[] = [];
+  if (singleId) {
+    ids = [singleId];
+  } else if (idsParam) {
+    ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
+  } else {
+    try {
+      const body = await req.json();
+      if (Array.isArray(body?.ids)) {
+        ids = body.ids.filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
+      }
+    } catch {
+      // no JSON body
+    }
+  }
+
+  ids = [...new Set(ids)].slice(0, 500);
+  if (ids.length === 0) {
+    return jsonError("leads", "ID or ids required", 400);
+  }
+
+  const result = await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+  return NextResponse.json({ success: true, deleted: result.count });
 }

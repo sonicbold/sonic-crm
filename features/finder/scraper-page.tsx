@@ -1,18 +1,11 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
-  Sparkles,
-  Search,
   Building2,
-  MapPin,
   Star,
-  Globe,
-  ShieldCheck,
   Layers3,
   ArrowRight,
-  CheckCircle2,
-  Zap,
   RefreshCw,
   Play,
   Database,
@@ -20,29 +13,10 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Button } from "@/shared/ui/button";
-import { Input } from "@/shared/ui/input";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/shared/ui/card";
 import { toast } from "@/shared/ui/use-toast";
 import { businessLink } from "@/shared/utils";
-
-interface SearchInterpretation {
-  category: string;
-  queries: string[];
-  locations: string[];
-  limit: number;
-  filters: {
-    minReviews: number | null;
-    maxReviews: number | null;
-    minRating: number | null;
-    maxRating: number | null;
-    website: "any" | "missing" | "required";
-    phone: "any" | "required";
-    businessStatus: "any" | "operational" | "closed";
-  };
-  segments: number;
-  explanation: string;
-}
 
 interface ScrapedLead {
   id: string;
@@ -75,14 +49,7 @@ interface SearchJob {
   createdAt: string;
 }
 
-const STEPS = ["Understand", "Search Maps", "Filter", "Read reviews", "Summarize", "Save to CRM"];
-
-const PRESETS = [
-  "Find 25 plumbers in Houston, TX under 150 reviews, with no website",
-  "Find 30 roofers in Dallas, TX under 100 reviews",
-  "Find 20 HVAC companies in Phoenix, AZ with a website",
-  "Find 15 dentists in Austin, TX under 200 reviews",
-];
+const STEPS = ["Pick city", "Search Maps", "Filter", "Read reviews", "Owner names", "Save to CRM"];
 
 function formatNextRequest(ms: number): string {
   if (ms <= 50) return "now";
@@ -96,9 +63,7 @@ function formatNextRequest(ms: number): string {
 
 export default function NativeScraperPage() {
   const [activeTab, setActiveTab] = useState<"search" | "history">("search");
-  const [prompt, setPrompt] = useState(PRESETS[0]);
-  const [parsing, setParsing] = useState(false);
-  const [interpretation, setInterpretation] = useState<SearchInterpretation | null>(null);
+  const [nextCity, setNextCity] = useState<{ city: string; reason: string; cityCount: number } | null>(null);
   const [searching, setSearching] = useState(false);
   const [step, setStep] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
@@ -119,33 +84,22 @@ export default function NativeScraperPage() {
     remaining: number;
     aiProvider: string;
     nextRequestInMs: number;
+    mapsPaidCalls: number;
+    mapsCacheHits: number;
+    crmDuplicates: number;
+    nameRatePct: number;
+    nameDetectNamed: number;
+    nameDetectWithReviews: number;
+    websitePct: number;
+    noWebsitePct: number;
+    withWebsite: number;
+    noWebsite: number;
+    leadCap: number | null;
     receivedAt: number;
   } | null>(null);
   const [now, setNow] = useState(() => Date.now());
-
-  async function handleParse(customPrompt?: string) {
-    const text = customPrompt || prompt;
-    if (!text.trim()) return;
-    setParsing(true);
-    try {
-      const res = await fetch("/api/scraper/parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setInterpretation(data);
-    } catch (err: unknown) {
-      toast({
-        title: "Parse Error",
-        description: err instanceof Error ? err.message : "Could not interpret the request",
-        variant: "destructive",
-      });
-    } finally {
-      setParsing(false);
-    }
-  }
+  const readRef = useRef<AbortController | null>(null);
+  const following = useRef(false);
 
   async function loadJobs() {
     setLoadingJobs(true);
@@ -161,8 +115,8 @@ export default function NativeScraperPage() {
   }
 
   useEffect(() => {
-    handleParse();
     loadJobs();
+    loadNextCity();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -172,8 +126,165 @@ export default function NativeScraperPage() {
     return () => clearInterval(timer);
   }, [searching]);
 
-  async function handleSearch() {
-    if (!prompt.trim() || searching) return;
+  function applyEvent(event: Record<string, unknown>, replay = false) {
+    if (event.type === "step") setStep(Number(event.step) || 0);
+    if (event.type === "log") setLogs((prev) => [...prev, String(event.message)]);
+    if (event.type === "progress") {
+      setProgress({
+        current: Number(event.current) || 0,
+        total: Number(event.total) || 0,
+        message: String(event.message || ""),
+      });
+    }
+    if (event.type === "status") {
+      setFinderStatus((prev) => ({
+        target: typeof event.target === "number" ? event.target : prev?.target ?? 0,
+        validLeads: typeof event.validLeads === "number" ? event.validLeads : prev?.validLeads ?? 0,
+        remaining: typeof event.remaining === "number" ? event.remaining : prev?.remaining ?? 0,
+        aiProvider: event.aiProvider != null ? String(event.aiProvider) : prev?.aiProvider ?? "waiting",
+        nextRequestInMs:
+          typeof event.nextRequestInMs === "number" ? event.nextRequestInMs : prev?.nextRequestInMs ?? 0,
+        mapsPaidCalls: typeof event.mapsPaidCalls === "number" ? event.mapsPaidCalls : prev?.mapsPaidCalls ?? 0,
+        mapsCacheHits: typeof event.mapsCacheHits === "number" ? event.mapsCacheHits : prev?.mapsCacheHits ?? 0,
+        crmDuplicates: typeof event.crmDuplicates === "number" ? event.crmDuplicates : prev?.crmDuplicates ?? 0,
+        nameRatePct: typeof event.nameRatePct === "number" ? event.nameRatePct : prev?.nameRatePct ?? 0,
+        nameDetectNamed: typeof event.nameDetectNamed === "number" ? event.nameDetectNamed : prev?.nameDetectNamed ?? 0,
+        nameDetectWithReviews:
+          typeof event.nameDetectWithReviews === "number" ? event.nameDetectWithReviews : prev?.nameDetectWithReviews ?? 0,
+        websitePct: typeof event.websitePct === "number" ? event.websitePct : prev?.websitePct ?? 0,
+        noWebsitePct: typeof event.noWebsitePct === "number" ? event.noWebsitePct : prev?.noWebsitePct ?? 0,
+        withWebsite: typeof event.withWebsite === "number" ? event.withWebsite : prev?.withWebsite ?? 0,
+        noWebsite: typeof event.noWebsite === "number" ? event.noWebsite : prev?.noWebsite ?? 0,
+        leadCap: typeof event.leadCap === "number" ? event.leadCap : event.leadCap === null ? null : prev?.leadCap ?? null,
+        receivedAt: Date.now(),
+      }));
+    }
+    if (event.type === "error" && !replay) {
+      toast({ title: "Scraper Failed", description: String(event.message), variant: "destructive" });
+    }
+    if (event.type === "saved") {
+      const stats = event.stats as {
+        requested: number;
+        found: number;
+        duplicates: number;
+        newLeads: number;
+        skippedNoPhone?: number;
+      };
+      setResults({
+        stats,
+        leads: (event.leads as ScrapedLead[]) || [],
+        provider: String(event.provider || "finder"),
+      });
+      setCsvFilename(String(event.csvFilename || ""));
+      setWarnings((event.warnings as string[]) || []);
+      setStep(6);
+      if (!replay) {
+        toast({
+          title: `Discovered ${stats.newLeads} new leads`,
+          description: `${stats.duplicates} duplicates skipped. Finder Maps + reviews are now in your CRM.`,
+        });
+      }
+      loadJobs();
+      loadNextCity();
+    }
+  }
+
+  async function readStream(res: Response) {
+    if (!res.ok || !res.body) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data as { error?: string }).error || "Could not start the search.");
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const consume = (chunk: string) => {
+      const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+      if (!line) return;
+      try {
+        applyEvent(JSON.parse(line.slice(6).trim()) as Record<string, unknown>);
+      } catch {
+        /* Ignore malformed SSE frames. */
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() ?? "";
+      for (const chunk of chunks) consume(chunk);
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(buffer);
+  }
+
+  async function resumeRun(signal: AbortSignal) {
+    const res = await fetch("/api/scraper/run", { signal, cache: "no-store" });
+    if (!res.ok || signal.aborted || following.current) return;
+    const data = (await res.json()) as { running?: boolean; events?: Record<string, unknown>[] };
+    const events = Array.isArray(data.events) ? data.events : [];
+    if (signal.aborted || following.current) return;
+    if (!data.running && events.length === 0) return;
+    if (!data.running) {
+      for (const event of events) applyEvent(event, true);
+      return;
+    }
+    following.current = true;
+    setSearching(true);
+    try {
+      for (const event of events) applyEvent(event, true);
+      if (signal.aborted) return;
+      const stream = await fetch(`/api/scraper/run?stream=1&from=${events.length}`, {
+        signal,
+        cache: "no-store",
+      });
+      await readStream(stream);
+    } finally {
+      if (!signal.aborted) {
+        following.current = false;
+        setSearching(false);
+        setProgress(null);
+      }
+    }
+  }
+
+  useEffect(() => {
+    const ac = new AbortController();
+    readRef.current = ac;
+    void resumeRun(ac.signal).catch((err: unknown) => {
+      if (ac.signal.aborted) return;
+      console.error(err);
+    });
+    return () => {
+      following.current = false;
+      ac.abort();
+    };
+    // Reattach once when this page is opened again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadNextCity() {
+    try {
+      const res = await fetch("/api/scraper/next-city");
+      const data = await res.json();
+      if (res.ok) {
+        setNextCity({
+          city: String(data.city || ""),
+          reason: String(data.reason || ""),
+          cityCount: Number(data.cityCount) || 0,
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function runExecute() {
+    if (searching) return;
+    following.current = true;
+    readRef.current?.abort();
+    const controller = new AbortController();
+    readRef.current = controller;
     setSearching(true);
     setResults(null);
     setLogs([]);
@@ -186,142 +297,55 @@ export default function NativeScraperPage() {
       const res = await fetch("/api/scraper/execute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({}),
+        signal: controller.signal,
       });
-      if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Could not start the search.");
+      if (res.status === 409) {
+        following.current = false;
+        await resumeRun(controller.signal);
+        return;
       }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      const applyEvent = (event: Record<string, unknown>) => {
-        if (event.type === "step") setStep(Number(event.step) || 0);
-        if (event.type === "log") setLogs((prev) => [...prev, String(event.message)]);
-        if (event.type === "progress") {
-          setProgress({
-            current: Number(event.current) || 0,
-            total: Number(event.total) || 0,
-            message: String(event.message || ""),
-          });
-        }
-        if (event.type === "status") {
-          setFinderStatus((prev) => ({
-            target: typeof event.target === "number" ? event.target : prev?.target ?? 0,
-            validLeads: typeof event.validLeads === "number" ? event.validLeads : prev?.validLeads ?? 0,
-            remaining: typeof event.remaining === "number" ? event.remaining : prev?.remaining ?? 0,
-            aiProvider: event.aiProvider != null ? String(event.aiProvider) : prev?.aiProvider ?? "waiting",
-            nextRequestInMs:
-              typeof event.nextRequestInMs === "number" ? event.nextRequestInMs : prev?.nextRequestInMs ?? 0,
-            receivedAt: Date.now(),
-          }));
-        }
-        if (event.type === "parsed" && event.parsed && typeof event.parsed === "object") {
-          const parsed = event.parsed as {
-            businessType: string;
-            city: string;
-            maxReviews: number | null;
-            websitePreference: "with" | "without" | "any";
-            targetCount: number;
-          };
-          setInterpretation({
-            category: parsed.businessType,
-            queries: [parsed.businessType],
-            locations: [parsed.city],
-            limit: parsed.targetCount,
-            filters: {
-              minReviews: null,
-              maxReviews: parsed.maxReviews,
-              minRating: null,
-              maxRating: null,
-              website:
-                parsed.websitePreference === "without"
-                  ? "missing"
-                  : parsed.websitePreference === "with"
-                    ? "required"
-                    : "any",
-              phone: "any",
-              businessStatus: "operational",
-            },
-            segments: 1,
-            explanation: `Looking for ${parsed.targetCount} ${parsed.businessType} in ${parsed.city}${
-              parsed.maxReviews !== null ? `, under ${parsed.maxReviews} reviews` : ""
-            }, website: ${parsed.websitePreference}.`,
-          });
-        }
-        if (event.type === "error") {
-          toast({ title: "Scraper Failed", description: String(event.message), variant: "destructive" });
-        }
-        if (event.type === "saved") {
-          const stats = event.stats as {
-            requested: number;
-            found: number;
-            duplicates: number;
-            newLeads: number;
-            skippedNoPhone?: number;
-          };
-          setResults({
-            stats,
-            leads: (event.leads as ScrapedLead[]) || [],
-            provider: String(event.provider || "finder"),
-          });
-          setCsvFilename(String(event.csvFilename || ""));
-          setWarnings((event.warnings as string[]) || []);
-          setStep(6);
-          toast({
-            title: `Discovered ${stats.newLeads} new leads`,
-            description: `${stats.duplicates} duplicates skipped. Finder Maps + reviews are now in your CRM.`,
-          });
-          loadJobs();
-        }
-      };
-      const consume = (chunk: string) => {
-        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
-        if (!line) return;
-        try {
-          const event = JSON.parse(line.slice(6).trim()) as Record<string, unknown>;
-          applyEvent(event);
-        } catch {
-          /* Ignore malformed SSE frames. */
-        }
-      };
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop() ?? "";
-        for (const chunk of chunks) consume(chunk);
-      }
-      buffer += decoder.decode();
-      if (buffer.trim()) consume(buffer);
+      await readStream(res);
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       toast({
         title: "Scraper Failed",
         description: err instanceof Error ? err.message : "Search failed",
         variant: "destructive",
       });
     } finally {
-      setSearching(false);
-      setProgress(null);
+      if (!controller.signal.aborted) {
+        following.current = false;
+        setSearching(false);
+        setProgress(null);
+      }
     }
   }
 
-  const websiteLabel =
-    interpretation?.filters.website === "missing"
-      ? "No Website Only"
-      : interpretation?.filters.website === "required"
-        ? "Website Required"
-        : "Websites Included";
+  function handleStop() {
+    void fetch("/api/scraper/stop", { method: "POST" });
+    toast({
+      title: "Finder turned off",
+      description: "Leads found so far are being saved.",
+    });
+  }
+
+  function handlePower() {
+    if (searching) {
+      handleStop();
+      return;
+    }
+    void runExecute();
+  }
 
   return (
     <div className="space-y-6 animate-fade-in max-w-7xl mx-auto pb-12">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <p className="text-[10px] font-mono font-bold text-copper uppercase tracking-[0.15em] mb-2">Discovery</p>
-          <h1 className="text-4xl font-heading font-bold tracking-tight text-foreground">AI Lead Scraper</h1>
+          <h1 className="text-4xl font-heading font-bold tracking-tight text-foreground">Canvass</h1>
           <p className="text-sm font-sans text-muted-foreground mt-2">
-            Finder pipeline: Gemini understands the request, Apify searches Maps, reviews are summarized, then leads sync into this CRM.
+            One click. Walks plumber cities in 10-lead batches and starts the next batch by itself. Turn off is the only stop.
           </p>
         </div>
 
@@ -333,8 +357,8 @@ export default function NativeScraperPage() {
                 activeTab === "search" ? "bg-muted/60 text-foreground" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Search className="h-3.5 w-3.5" />
-              New Search
+              <Play className="h-3.5 w-3.5" />
+              Canvass
             </button>
             <button
               onClick={() => {
@@ -370,128 +394,37 @@ export default function NativeScraperPage() {
         <div className="space-y-6">
           <Card className="border-border shadow-sm rounded-2xl bg-card">
             <CardHeader className="border-b border-border bg-background/50 px-6 py-5">
-              <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center justify-between gap-3">
                 <CardTitle className="text-sm font-mono uppercase tracking-widest text-muted-foreground font-semibold flex items-center gap-2">
-                  <Zap className="h-4 w-4 text-copper" />
-                  Natural Language AI Search
+                  <Play className="h-4 w-4 text-copper" />
+                  Start Canvass
                 </CardTitle>
-                <span className="text-[11px] font-mono text-muted-foreground flex items-center gap-1">
-                  <ShieldCheck className="h-3.5 w-3.5 text-teal-bright" />
-                  Deduplication Active
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent className="p-6 space-y-5">
-              <div className="relative">
-                <Input
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleParse();
-                  }}
-                  placeholder="e.g. Find 25 plumbers in Houston, under 150 reviews, with no website..."
-                  className="h-14 pl-5 pr-28 text-sm font-sans bg-background border-border rounded-xl focus-visible:ring-copper shadow-sm"
-                />
                 <Button
-                  onClick={() => handleParse()}
-                  disabled={parsing || !prompt.trim()}
-                  className="absolute right-2 top-2 h-10 px-5 rounded-lg bg-copper hover:bg-copper-hover text-white font-semibold"
+                  onClick={handlePower}
+                  disabled={!searching && !nextCity}
+                  className={
+                    searching
+                      ? "rounded-xl font-semibold bg-foreground text-background hover:bg-foreground/90"
+                      : "rounded-xl font-semibold bg-copper hover:bg-copper-hover text-white"
+                  }
                 >
-                  {parsing ? <RefreshCw className="h-4 w-4 animate-spin mr-2" /> : <Sparkles className="h-4 w-4 mr-2" />}
-                  Interpret
+                  {searching ? "Turn off" : "Turn on"}
                 </Button>
               </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-mono font-medium text-muted-foreground mr-2">Try:</span>
-                {PRESETS.map((preset) => (
-                  <button
-                    key={preset}
-                    onClick={() => {
-                      setPrompt(preset);
-                      handleParse(preset);
-                    }}
-                    className="text-xs font-sans bg-background border border-border px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:border-copper/50 transition-all truncate max-w-xs text-left"
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
+            </CardHeader>
+            <CardContent className="p-6">
+              <p className="text-sm font-sans text-foreground">
+                {nextCity
+                  ? `Next city: ${nextCity.city}. ${nextCity.reason}${
+                      nextCity.cityCount ? ` Walking ${nextCity.cityCount} markets.` : ""
+                    }`
+                  : "Choosing the next city."}
+              </p>
+              <p className="text-sm font-sans text-muted-foreground mt-2">
+                Each city starts with a deep plumbers search. Drain cleaning and water heater installation run only if that city is still thin. Every 10 new shops save, then the next 10 start on their own. Stays on while you use the rest of the CRM. Turn off is the only thing that stops it.
+              </p>
             </CardContent>
           </Card>
-
-          {interpretation && (
-            <Card className="border-border bg-card rounded-2xl shadow-sm">
-              <CardHeader className="border-b border-border bg-background/50 px-6 py-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-teal-bright" />
-                    <CardTitle className="font-heading font-semibold text-lg text-foreground">AI Query Interpretation</CardTitle>
-                  </div>
-                  <Badge variant="outline" className="font-mono text-copper border-copper/30 bg-copper/5 rounded-full px-3 text-xs">
-                    {interpretation.limit} Target Leads
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="p-6 space-y-6">
-                <p className="text-sm font-sans text-foreground bg-muted/40 p-4 rounded-xl border border-border/50">
-                  {interpretation.explanation}
-                </p>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="p-4 bg-background rounded-xl border border-border">
-                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider font-mono">Category</p>
-                    <p className="text-sm font-sans font-semibold mt-2 flex items-center gap-2 truncate text-foreground">
-                      <Building2 className="h-4 w-4 text-copper shrink-0" />
-                      {interpretation.category}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-background rounded-xl border border-border">
-                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider font-mono">Location</p>
-                    <p className="text-sm font-sans font-semibold mt-2 flex items-center gap-2 truncate text-foreground">
-                      <MapPin className="h-4 w-4 text-copper shrink-0" />
-                      {interpretation.locations[0]}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-background rounded-xl border border-border">
-                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider font-mono">Review Cap</p>
-                    <p className="text-sm font-sans font-semibold mt-2 flex items-center gap-2 text-foreground">
-                      <Star className="h-4 w-4 text-copper shrink-0" />
-                      {interpretation.filters.maxReviews ? `Under ${interpretation.filters.maxReviews}` : "Any count"}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-background rounded-xl border border-border">
-                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider font-mono">Website</p>
-                    <p className="text-sm font-sans font-semibold mt-2 flex items-center gap-2 truncate text-foreground">
-                      <Globe className="h-4 w-4 text-copper shrink-0" />
-                      {websiteLabel}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <Button
-                    size="lg"
-                    onClick={handleSearch}
-                    disabled={searching}
-                    className="w-full sm:w-auto px-8 rounded-xl font-semibold shadow-sm bg-copper hover:bg-copper-hover text-white transition-all h-12"
-                  >
-                    {searching ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Running Finder pipeline...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-4 w-4 mr-2 fill-current" />
-                        Execute AI Search ({interpretation.limit} Leads)
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
           {(searching || logs.length > 0) && (
             <Card className="border-border bg-card rounded-2xl shadow-sm">
@@ -521,9 +454,11 @@ export default function NativeScraperPage() {
                   })}
                 </div>
                 {finderStatus && (
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-11 gap-3">
                     <div className="rounded-xl border border-border bg-background p-3">
-                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Target</p>
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                        {finderStatus.leadCap ? "Lead cap" : "Cities"}
+                      </p>
                       <p className="text-xl font-heading font-bold text-foreground mt-1">{finderStatus.target}</p>
                     </div>
                     <div className="rounded-xl border border-teal-bright/30 bg-teal-bright/5 p-3">
@@ -531,12 +466,11 @@ export default function NativeScraperPage() {
                       <p className="text-xl font-heading font-bold text-teal-bright mt-1">{finderStatus.validLeads}</p>
                     </div>
                     <div className="rounded-xl border border-border bg-background p-3">
-                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Remaining</p>
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                        {finderStatus.leadCap ? "Leads left" : "Cities left"}
+                      </p>
                       <p className="text-xl font-heading font-bold text-foreground mt-1">
-                        {Math.max(
-                          0,
-                          finderStatus.remaining || finderStatus.target - finderStatus.validLeads,
-                        )}
+                        {Math.max(0, finderStatus.remaining)}
                       </p>
                     </div>
                     <div className="rounded-xl border border-border bg-background p-3">
@@ -554,6 +488,35 @@ export default function NativeScraperPage() {
                             )
                           : "idle"}
                       </p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Apify paid</p>
+                      <p className="text-xl font-heading font-bold text-foreground mt-1">{finderStatus.mapsPaidCalls}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Apify cache</p>
+                      <p className="text-xl font-heading font-bold text-foreground mt-1">{finderStatus.mapsCacheHits}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">CRM dups</p>
+                      <p className="text-xl font-heading font-bold text-foreground mt-1">{finderStatus.crmDuplicates}</p>
+                    </div>
+                    <div className="rounded-xl border border-copper/30 bg-copper/5 p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-copper">Name detect</p>
+                      <p className="text-xl font-heading font-bold text-foreground mt-1">{finderStatus.nameRatePct}%</p>
+                      <p className="text-[10px] font-sans text-muted-foreground mt-1">
+                        {finderStatus.nameDetectNamed}/{finderStatus.nameDetectWithReviews} with review text
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-teal-bright/30 bg-teal-bright/5 p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-teal-bright">Has website</p>
+                      <p className="text-xl font-heading font-bold text-teal-bright mt-1">{finderStatus.websitePct}%</p>
+                      <p className="text-[10px] font-sans text-muted-foreground mt-1">{finderStatus.withWebsite} this session</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">No website</p>
+                      <p className="text-xl font-heading font-bold text-foreground mt-1">{finderStatus.noWebsitePct}%</p>
+                      <p className="text-[10px] font-sans text-muted-foreground mt-1">{finderStatus.noWebsite} this session</p>
                     </div>
                   </div>
                 )}
@@ -728,8 +691,8 @@ export default function NativeScraperPage() {
           <CardHeader className="border-b border-border bg-background/50 px-6 py-5">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="font-heading text-lg font-semibold text-foreground">Search History</CardTitle>
-                <CardDescription className="text-xs font-sans">Past Finder scraper jobs saved in this CRM.</CardDescription>
+                <CardTitle className="font-heading text-lg font-semibold text-foreground">Canvass history</CardTitle>
+                <CardDescription className="text-xs font-sans">Past Finder runs saved in this CRM.</CardDescription>
               </div>
               <Button size="sm" variant="outline" onClick={loadJobs} disabled={loadingJobs} className="rounded-xl bg-background">
                 <RefreshCw className={`h-3.5 w-3.5 mr-2 ${loadingJobs ? "animate-spin" : ""}`} />
@@ -740,7 +703,7 @@ export default function NativeScraperPage() {
           <CardContent className="p-0">
             {jobs.length === 0 ? (
               <div className="p-10 text-center font-sans text-muted-foreground text-sm">
-                No past searches yet. Run your first discovery job above!
+                No Canvass runs yet. Turn it on above.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -749,7 +712,7 @@ export default function NativeScraperPage() {
                     <tr className="border-b border-border bg-background text-left text-[11px] font-mono uppercase tracking-widest text-muted-foreground">
                       <th className="py-4 px-6 font-semibold">Summary</th>
                       <th className="py-4 px-6 font-semibold">Location</th>
-                      <th className="py-4 px-6 font-semibold">Requested</th>
+                      <th className="py-4 px-6 font-semibold">Kept</th>
                       <th className="py-4 px-6 font-semibold">Discovered</th>
                       <th className="py-4 px-6 font-semibold">New Leads</th>
                       <th className="py-4 px-6 font-semibold">Status</th>

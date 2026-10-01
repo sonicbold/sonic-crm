@@ -186,7 +186,7 @@ export default function CampaignsPage() {
           <p className="text-[10px] font-mono font-bold text-copper uppercase tracking-[0.15em] mb-2">Outreach</p>
           <h1 className="text-4xl font-heading font-bold tracking-tight">New campaign</h1>
           <p className="text-sm font-sans text-muted-foreground mt-2">
-            Write the SMS, filter Has website / No website, check the leads, then queue the 9 AM–7 PM drip.
+            Write the SMS, filter by website status, check the leads, then queue the 9 AM–7 PM drip.
           </p>
         </div>
         <Card className="rounded-2xl border-border bg-card">
@@ -212,7 +212,7 @@ export default function CampaignsPage() {
           <p className="text-[10px] font-mono font-bold text-copper uppercase tracking-[0.15em] mb-2">Outreach</p>
           <h1 className="text-4xl font-heading font-bold tracking-tight">Select leads</h1>
           <p className="text-sm font-sans text-muted-foreground mt-2">
-            {enrollOpen.name}: filter who has a website vs who does not, then check who gets this SMS.
+            {enrollOpen.name}: filter Has Website or No Website, then check who gets this SMS.
           </p>
         </div>
         <Card className="rounded-2xl border-border bg-card">
@@ -251,7 +251,7 @@ export default function CampaignsPage() {
           <p className="text-[10px] font-mono font-bold text-copper uppercase tracking-[0.15em] mb-2">Outreach</p>
           <h1 className="text-4xl font-heading font-bold tracking-tight">Campaigns</h1>
           <p className="text-sm font-sans text-muted-foreground mt-2">
-            Strategic Drip: pick Has website or No website, check leads, one SMS each, spaced 9:00 AM–7:00 PM.
+            Strategic Drip: target Has Website or No Website, check leads, one SMS each, spaced 9:00 AM–7:00 PM.
           </p>
         </div>
         <Button className="rounded-xl h-10 bg-copper hover:bg-copper-hover text-white transition-all font-semibold px-5" onClick={() => setMode("create")}>
@@ -263,7 +263,7 @@ export default function CampaignsPage() {
         <div className="flex flex-col items-center justify-center h-64 border border-dashed border-border rounded-2xl text-muted-foreground bg-card">
           <Zap className="h-10 w-10 mb-3 text-muted-foreground/40" />
           <p className="font-heading font-semibold text-foreground">No campaigns yet</p>
-          <p className="text-sm font-sans mt-1">Write a message, filter website / no website, check leads, start drip</p>
+          <p className="text-sm font-sans mt-1">Write a message, filter Has Website or No Website, check leads, start drip</p>
         </div>
       ) : (
         <div className="grid gap-4">

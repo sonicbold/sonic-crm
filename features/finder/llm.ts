@@ -3,15 +3,11 @@ import type { AppSettings, Review } from "@/features/finder/types";
 import {
   AiRequestPool,
   RateLimitError,
-  isDailyLimitMessage,
   isRateLimitError,
   loadAiPoolLimits,
-  parseRetryAfterMs,
-  retryAfterFromMessage,
   toRateLimitError,
   type AiCompleteCall,
   type AiPoolStatus,
-  type AiProviderConfig,
 } from "@/features/finder/ai-pool";
 
 export type ReviewInsight = {
@@ -27,18 +23,14 @@ export {
   toRateLimitError,
 };
 
-const GROQ_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"];
+const SUMMARY_PROMPT =
+  'Summarize these Google reviews in 2-3 sentences. Reply with JSON: {"summary":"..."}.';
 
-const OWNER_PROMPT = `You are analyzing Google Business reviews for a small plumbing shop. In these businesses the person who showed up or did the work is the owner.
+const INSIGHT_PROMPT = `You read Google reviews for a local service business. The person who did the work or signed an owner reply is usually the owner.
 
-Below are the review texts, including any "Response from the owner" replies.
-
-Your task:
-1. Find any personal name in the review text or in a signed owner reply. That name is the owner.
-2. Prefer a name tied to phrases like "came out," "fixed," "showed up," "ask for," or a signed owner reply (e.g. "Thanks, - Mike"). If several personal names appear, use the first one in the reviews.
-3. Ignore the Google reviewer byline. Do not treat the business name as a person.
-4. If no personal name appears in the text, respond with "Owner name not found" — do not guess a name that is not written.
-5. Output only the owner's name (first and last if available), with no extra commentary.`;
+Return JSON only: {"summary":"...","ownerName":"..."}.
+- summary: 2-3 sentences on what customers praise or complain about.
+- ownerName: a personal name written in the review text or a signed owner reply (for example "Thanks, - Mike"). Prefer a name tied to "came out", "fixed", "showed up", or "ask for". Ignore the reviewer byline and the business name. If no personal name is written, use "Owner name not found". Do not guess.`;
 
 function formatReviews(reviews: Review[]): string {
   return reviews
@@ -68,15 +60,35 @@ function cleanOwnerName(raw: string): string {
   return name.split(/\n/)[0].trim() || "Owner name not found";
 }
 
-function parseSummary(raw: string): string {
+function parseJsonObject(raw: string): Record<string, unknown> | null {
   try {
     const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
     const text = (fenced ? fenced[1] : raw).trim();
-    const json = JSON.parse(text) as { summary?: string };
-    return String(json.summary ?? "").trim() || "No review summary available.";
+    const json = JSON.parse(text) as unknown;
+    return json && typeof json === "object" ? (json as Record<string, unknown>) : null;
   } catch {
-    return raw.trim().slice(0, 400) || "No review summary available.";
+    return null;
   }
+}
+
+function parseSummary(raw: string): string {
+  const json = parseJsonObject(raw);
+  if (json) return String(json.summary ?? "").trim() || "No review summary available.";
+  return raw.trim().slice(0, 400) || "No review summary available.";
+}
+
+function parseInsight(raw: string): ReviewInsight {
+  const json = parseJsonObject(raw);
+  if (!json) {
+    return {
+      summary: raw.trim().slice(0, 400) || "No review summary available.",
+      ownerName: "Owner name not found",
+    };
+  }
+  return {
+    summary: String(json.summary ?? "").trim() || "No review summary available.",
+    ownerName: cleanOwnerName(String(json.ownerName ?? "")),
+  };
 }
 
 function groqErrorStatus(err: unknown): number | undefined {
@@ -85,120 +97,112 @@ function groqErrorStatus(err: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+export const GPT_OSS_120B_MODEL = "openai/gpt-oss-120b";
+export const GROQ_CONCURRENT = 1;
+export const GEMINI_CONCURRENT = 1;
+export const GEMINI_SLOT_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"] as const;
+
+export async function geminiComplete(
+  apiKey: string,
+  model: string,
+  opts: AiCompleteCall,
+): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const body: Record<string, unknown> = {
+    contents: [{ role: "user", parts: [{ text: opts.user }] }],
+    generationConfig: {
+      temperature: 0,
+      ...(opts.json ? { responseMimeType: "application/json" } : {}),
+    },
+  };
+  if (opts.system.trim()) {
+    body.systemInstruction = { parts: [{ text: opts.system }] };
+  }
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    const error = new Error(`Gemini ${model} failed (${res.status}): ${errText.slice(0, 240)}`);
+    (error as Error & { status?: number }).status = res.status;
+    if (res.status === 429 || isRateLimitError(error)) throw toRateLimitError(error, "Gemini");
+    throw error;
+  }
+  const data = (await res.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  };
+  return data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+}
+
+function geminiSlots(settings: AppSettings): { key: string; model: string; label: string }[] {
+  const keys = [settings.GEMINI_API_KEY, settings.GEMINI_API_KEY_2, settings.GEMINI_API_KEY_3];
+  const models = [settings.GEMINI_MODEL || GEMINI_SLOT_MODELS[0], GEMINI_SLOT_MODELS[1], GEMINI_SLOT_MODELS[2]];
+  const labels = ["Gemini 1 summaries", "Gemini 2 summaries", "Gemini 3 summaries"];
+  return keys
+    .map((key, index) => ({ key: key.trim(), model: models[index] || GEMINI_SLOT_MODELS[0], label: labels[index]! }))
+    .filter((row) => row.key);
+}
+
 export async function groqComplete(
   apiKey: string,
   preferredModel: string,
   opts: AiCompleteCall,
 ): Promise<string> {
-  const models = [preferredModel, ...GROQ_MODELS.filter((m) => m !== preferredModel)];
-  let lastError: unknown;
-  for (const model of models) {
-    try {
-      const groq = new Groq({ apiKey });
-      const completion = await groq.chat.completions.create({
-        model,
-        temperature: 0.1,
-        ...(opts.json ? { response_format: { type: "json_object" as const } } : {}),
-        messages: [
-          { role: "system", content: opts.system },
-          { role: "user", content: opts.user },
-        ],
-      });
-      return completion.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      lastError = err;
-      const status = groqErrorStatus(err);
-      if (status === 429 || isRateLimitError(err)) {
-        throw toRateLimitError(err, "Groq");
-      }
-      if (status === 404) continue;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
-export async function openrouterComplete(
-  apiKey: string,
-  model: string,
-  opts: AiCompleteCall,
-): Promise<string> {
-  const body: Record<string, unknown> = {
-    model,
-    temperature: 0.1,
-    messages: [
-      { role: "system", content: opts.system },
-      { role: "user", content: opts.user },
-    ],
-  };
-  if (opts.json) body.response_format = { type: "json_object" };
-
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:8080",
-      "X-Title": "Lead Finder",
-    },
-    body: JSON.stringify(body),
-  });
-  const data = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-    error?: { message?: string };
-  };
-  const message = data.error?.message ?? JSON.stringify(data).slice(0, 200);
-  if (res.status === 429 || isRateLimitError({ status: res.status, message })) {
-    const retryHeader = res.headers.get("retry-after");
-    throw new RateLimitError(`OpenRouter rate limit: ${message}`.slice(0, 400), {
-      retryAfterMs: retryHeader ? parseRetryAfterMs(retryHeader) : retryAfterFromMessage(message),
-      daily: isDailyLimitMessage(message),
+  const model = (opts.model || preferredModel).trim() || GPT_OSS_120B_MODEL;
+  try {
+    const groq = new Groq({ apiKey, timeout: 45_000 });
+    const completion = await groq.chat.completions.create({
+      model,
+      temperature: 0,
+      ...(opts.json ? { response_format: { type: "json_object" as const } } : {}),
+      messages: [
+        ...(opts.system.trim() ? [{ role: "system" as const, content: opts.system }] : []),
+        { role: "user" as const, content: opts.user },
+      ],
     });
+    return completion.choices[0]?.message?.content ?? "";
+  } catch (err) {
+    const status = groqErrorStatus(err);
+    if (status === 429 || isRateLimitError(err)) {
+      throw toRateLimitError(err, "Groq");
+    }
+    throw err instanceof Error ? err : new Error(String(err));
   }
-  if (!res.ok) {
-    throw new Error(`OpenRouter failed (${res.status}): ${message}`);
-  }
-  return data.choices?.[0]?.message?.content ?? "";
 }
 
+function groqKeys(settings: AppSettings): string[] {
+  return [settings.GROQ_API_KEY_1, settings.GROQ_API_KEY_2, settings.GROQ_API_KEY_3]
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Owner names use GPT-OSS 120B on Groq (`openai/gpt-oss-120b`).
+ * Calls rotate across the configured Groq keys.
+ */
 export function createAiPool(
   settings: AppSettings,
   onStatus?: (status: AiPoolStatus) => void,
   overrides?: { now?: () => number; sleep?: (ms: number) => Promise<void> },
 ): AiRequestPool {
   const limits = loadAiPoolLimits();
-  const providers: AiProviderConfig[] = [];
-  if (settings.GROQ_API_KEY_1) {
-    providers.push({
-      id: "groq-1",
-      label: "Groq Key 1",
-      family: "groq",
-      rpm: limits.groqRpm,
-      rpd: limits.groqRpd,
-      complete: (call) => groqComplete(settings.GROQ_API_KEY_1, settings.GROQ_MODEL, call),
-    });
-  }
-  if (settings.GROQ_API_KEY_2) {
-    providers.push({
-      id: "groq-2",
-      label: "Groq Key 2",
-      family: "groq",
-      rpm: limits.groqRpm,
-      rpd: limits.groqRpd,
-      complete: (call) => groqComplete(settings.GROQ_API_KEY_2, settings.GROQ_MODEL, call),
-    });
-  }
-  if (settings.OPENROUTER_API_KEY) {
-    providers.push({
-      id: "openrouter",
-      label: "OpenRouter",
-      family: "openrouter",
-      rpm: limits.openrouterRpm,
-      rpd: limits.openrouterRpd,
-      complete: (call) => openrouterComplete(settings.OPENROUTER_API_KEY, settings.OPENROUTER_MODEL, call),
-    });
+  const keys = groqKeys(settings);
+  if (!keys.length) {
+    throw new Error("Add a Groq API key in Settings before finding owner names.");
   }
   return new AiRequestPool({
-    providers,
+    providers: keys.map((key, index) => ({
+      id: `groq-${index + 1}`,
+      label: `Groq ${index + 1} GPT-OSS 120B`,
+      family: "groq" as const,
+      rpm: limits.groqRpm,
+      rpd: limits.groqRpd,
+      maxConcurrent: GROQ_CONCURRENT,
+      complete: (call) => groqComplete(key, call.model || GPT_OSS_120B_MODEL, call),
+    })),
     minDelayMs: limits.minDelayMs,
     onStatus,
     now: overrides?.now,
@@ -206,32 +210,65 @@ export function createAiPool(
   });
 }
 
+/**
+ * Review summaries use Gemini Flash on a separate pool so they never share Groq RPM.
+ * Key 1 = GEMINI_MODEL (default 3.6-flash), key 2 = 3.5-flash, key 3 = 2.5-flash.
+ */
+export function createSummaryPool(
+  settings: AppSettings,
+  onStatus?: (status: AiPoolStatus) => void,
+  overrides?: { now?: () => number; sleep?: (ms: number) => Promise<void> },
+): AiRequestPool | null {
+  const slots = geminiSlots(settings);
+  if (!slots.length) return null;
+  const limits = loadAiPoolLimits();
+  return new AiRequestPool({
+    providers: slots.map((slot, index) => ({
+      id: `gemini-${index + 1}`,
+      label: slot.label,
+      family: "gemini" as const,
+      rpm: limits.geminiRpm,
+      rpd: limits.geminiRpd,
+      maxConcurrent: GEMINI_CONCURRENT,
+      complete: (call) => geminiComplete(slot.key, call.model || slot.model, call),
+    })),
+    minDelayMs: limits.minDelayMs,
+    onStatus,
+    now: overrides?.now,
+    sleep: overrides?.sleep,
+  });
+}
+
+/** Unused by Canvass. Kept for the old per-shop enrich path. */
 export async function summarizeReviews(opts: {
   businessName: string;
   reviews: Review[];
   pool: AiRequestPool;
+  knownOwner?: string;
 }): Promise<ReviewInsight> {
+  const known = cleanOwnerName(opts.knownOwner || "");
+  const hasKnown = known !== "Owner name not found";
   if (!opts.reviews.length) {
-    return { summary: "No recent reviews were available to summarize.", ownerName: "Owner name not found" };
+    return {
+      summary: "No recent reviews were available to summarize.",
+      ownerName: hasKnown ? known : "Owner name not found",
+    };
   }
 
-  const reviewBlock = formatReviews(opts.reviews);
-  const user = `Business: ${opts.businessName}\n\n${reviewBlock}`;
-
-  const [summaryRes, ownerRes] = await Promise.all([
-    opts.pool.complete({
-      system: 'Summarize these Google reviews in 2-3 sentences. Reply with JSON: {"summary":"..."}.',
+  const user = `Business: ${opts.businessName}\n\n${formatReviews(opts.reviews)}`;
+  if (hasKnown) {
+    const summaryRes = await opts.pool.complete({
+      system: SUMMARY_PROMPT,
       user,
       json: true,
-    }),
-    opts.pool.complete({
-      system: OWNER_PROMPT,
-      user,
-    }),
-  ]);
+    });
+    return { summary: parseSummary(summaryRes.text), ownerName: known };
+  }
 
-  return {
-    summary: parseSummary(summaryRes.text),
-    ownerName: cleanOwnerName(ownerRes.text),
-  };
+  const insightRes = await opts.pool.complete({
+    system: INSIGHT_PROMPT,
+    user,
+    json: true,
+  });
+  return parseInsight(insightRes.text);
 }

@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
-import { businessLink, formatPhone, leadHasWebsite } from "@/shared/utils";
+import { businessLink, formatPhone } from "@/shared/utils";
+import { WebsiteStatusBadge } from "@/features/leads/website-status-badge";
 import { Globe, Search } from "lucide-react";
 
 export type CampaignLeadRow = {
@@ -12,6 +13,7 @@ export type CampaignLeadRow = {
   phone: string;
   city: string | null;
   website: string | null;
+  websiteStatus?: string | null;
   googleMapsUrl?: string | null;
   status: string;
   archived?: boolean;
@@ -22,7 +24,7 @@ export type CampaignLeadRow = {
   }[];
 };
 
-export type WebsiteAudience = "with" | "without" | "any";
+export type WebsiteAudience = "with" | "without" | "uncertain" | "any";
 
 interface Props {
   campaignId?: string;
@@ -98,9 +100,10 @@ export function CampaignLeadPicker({ campaignId, selected, onSelectedChange }: P
   }
 
   const audiences: { id: WebsiteAudience; label: string; hint: string }[] = [
-    { id: "without", label: "No website", hint: "Same as Finder “no website”" },
-    { id: "with", label: "Has website", hint: "Businesses with a real site" },
-    { id: "any", label: "All leads", hint: "Ignore website filter" },
+    { id: "without", label: "No Website", hint: "No legitimate business website" },
+    { id: "with", label: "Has Website", hint: "Verified business website" },
+    { id: "uncertain", label: "Uncertain", hint: "Website could not be verified" },
+    { id: "any", label: "All leads", hint: "Ignore website status" },
   ];
 
   return (
@@ -165,7 +168,7 @@ export function CampaignLeadPicker({ campaignId, selected, onSelectedChange }: P
                 </th>
                 <th className="px-4 py-3 text-left">Company</th>
                 <th className="px-4 py-3 text-left">Phone</th>
-                <th className="px-4 py-3 text-left">Website</th>
+                <th className="px-4 py-3 text-left">Website status</th>
                 <th className="px-4 py-3 text-left">SMS</th>
               </tr>
             </thead>
@@ -177,14 +180,13 @@ export function CampaignLeadPicker({ campaignId, selected, onSelectedChange }: P
               ) : leads.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground font-sans">
-                    No leads in this filter. Scrape or import first, or switch Has website / No website.
+                    No leads in this filter. Scrape or import first, or switch website status.
                   </td>
                 </tr>
               ) : (
                 leads.map((lead) => {
                   const blocked = leadBlockedReason(lead, campaignId);
-                  const hasSite = leadHasWebsite(lead.website);
-                  const link = businessLink({ website: lead.website, googleMapsUrl: lead.googleMapsUrl });
+                  const link = lead.websiteStatus === "has_website" ? businessLink({ website: lead.website }) : null;
                   const checked = selected.has(lead.id);
                   return (
                     <tr
@@ -208,13 +210,14 @@ export function CampaignLeadPicker({ campaignId, selected, onSelectedChange }: P
                       </td>
                       <td className="px-4 py-3 font-mono text-xs">{formatPhone(lead.phone)}</td>
                       <td className="px-4 py-3">
-                        {hasSite && link ? (
-                          <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs text-copper hover:underline truncate max-w-[160px] inline-block">
-                            {link.label}
-                          </a>
-                        ) : (
-                          <span className="text-[10px] font-mono text-muted-foreground">No website</span>
-                        )}
+                        <div className="flex flex-col items-start gap-1">
+                          <WebsiteStatusBadge status={lead.websiteStatus} />
+                          {link ? (
+                            <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-xs text-copper hover:underline truncate max-w-[160px] inline-block">
+                              {link.label}
+                            </a>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{blocked || "Ready"}</td>
                     </tr>

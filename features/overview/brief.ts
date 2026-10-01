@@ -1,6 +1,7 @@
 import { prisma } from "@/shared/db";
 import { getConfig } from "@/shared/settings";
 import { writeDailyBrief } from "@/shared/gemini";
+import { logger } from "@/shared/log";
 import { addDaysCivil, zonedCivilToUtc } from "@/features/campaigns/drip-schedule";
 
 const CACHE_KEY = "OPERATOR_BRIEF";
@@ -130,7 +131,9 @@ function fallbackBrief(snap: Awaited<ReturnType<typeof snapshot>>) {
   const actions = [
     snap.needsYou[0] ? `Review suggested reply for ${snap.needsYou[0].shop}` : "Check Inbox for anything waiting",
     snap.dripRemaining > 0 ? "Let drip run through the 9 AM–7 PM window" : "Enroll new leads or scrape a city",
-    snap.topCitiesThisWeek[0] ? `Consider scraping near ${snap.topCitiesThisWeek[0].city}` : "Scrape 25 plumbers in a target city",
+    snap.topCitiesThisWeek[0]
+      ? `Consider scraping near ${snap.topCitiesThisWeek[0].city}`
+      : "Turn on Finder to canvass plumber cities",
   ];
   return { headline, body, actions };
 }
@@ -160,7 +163,7 @@ export async function getOperatorBrief(force = false): Promise<OperatorBrief> {
       copy = await writeDailyBrief(snap);
     }
   } catch (e) {
-    console.error("Daily brief Gemini failed:", e);
+    logger("overview.brief").error("Daily brief Gemini failed", { err: e });
   }
 
   const payload: OperatorBrief = {

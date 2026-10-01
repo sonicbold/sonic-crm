@@ -1,11 +1,10 @@
 import type { ParsedRequest, WebsitePreference } from "./types";
 
 const GEMINI_MODELS = [
+  "gemini-3.8-flash",
   "gemini-3.6-flash",
   "gemini-3.5-flash",
-  "gemini-2.5-flash",
   "gemini-flash-latest",
-  "gemini-2.5-flash-lite",
 ];
 
 function extractJson(text: string): unknown {
@@ -31,18 +30,20 @@ function asTargetCount(value: unknown, fallback = 50): number {
   return Math.floor(n);
 }
 
+function asOptionalCount(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
 function normalizeParsed(parsed: Record<string, unknown>): ParsedRequest {
   const targetCount = asTargetCount(parsed.targetCount, 50);
-  const maxReviewsRaw = parsed.maxReviews;
-  const maxReviews =
-    maxReviewsRaw === null || maxReviewsRaw === undefined || maxReviewsRaw === ""
-      ? null
-      : Math.max(0, Number(maxReviewsRaw));
-
   return {
     businessType: String(parsed.businessType || "").trim() || "businesses",
     city: String(parsed.city || "").trim() || "the specified city",
-    maxReviews: Number.isFinite(maxReviews as number) ? maxReviews : null,
+    minReviews: asOptionalCount(parsed.minReviews),
+    maxReviews: asOptionalCount(parsed.maxReviews),
     websitePreference: asPreference(parsed.websitePreference),
     targetCount,
   };
@@ -60,8 +61,11 @@ export function parseRequestLocally(prompt: string): ParsedRequest {
     websitePreference = "with";
   }
 
-  const reviewMatch = lower.match(/\b(?:under|below|less than|<)\s*(\d+)\s*reviews?\b/);
-  const maxReviews = reviewMatch ? Number(reviewMatch[1]) : null;
+  const between = lower.match(/\b(?:between|from)\s+(\d+)\s+(?:and|to)\s+(\d+)\s+reviews?\b/);
+  const atLeast = lower.match(/\b(?:at least|over|more than|minimum)\s+(\d+)\s+reviews?\b/);
+  const reviewMatch = lower.match(/\b(?:under|below|less than|fewer than|up to|<)\s*(\d+)\s*reviews?\b/);
+  const minReviews = between ? Number(between[1]) : atLeast ? Number(atLeast[1]) : null;
+  const maxReviews = between ? Number(between[2]) + 1 : reviewMatch ? Number(reviewMatch[1]) : null;
 
   const countMatch = text.match(/\b(?:find|get|scrape|pull)\s+(\d+)\b/i) || text.match(/\b(\d+)\s+(?:\w+\s+){0,3}in\b/i);
   const targetCount = countMatch ? Number(countMatch[1]) : 50;
@@ -76,6 +80,7 @@ export function parseRequestLocally(prompt: string): ParsedRequest {
   return {
     businessType,
     city,
+    minReviews,
     maxReviews,
     websitePreference,
     targetCount: asTargetCount(targetCount, 50),
@@ -87,7 +92,8 @@ async function callGemini(prompt: string, apiKey: string, model: string): Promis
 Return ONLY JSON with these keys:
 - businessType: string (e.g. "plumbers")
 - city: string (include state when given, e.g. "Houston, TX" or "Austin")
-- maxReviews: number or null (review-count upper limit; null if they did not specify)
+- minReviews: number or null (minimum review count; null if they did not specify a floor)
+- maxReviews: number or null (exclusive review-count upper limit; null if they did not specify a cap)
 - websitePreference: "with" | "without" | "any"
 - targetCount: number of businesses they want (default 50 if missing). Use the user's number as-is — do not cap it.
 
@@ -95,7 +101,10 @@ Rules:
 - "no website" / "without a website" / "don't have a website" => websitePreference "without"
 - "with a website" / "have a website" => "with"
 - if they don't mention websites => "any"
-- "under 150 reviews" => maxReviews 150 (exclusive upper bound: keep businesses with fewer than this)
+- "under 150 reviews" or "up to 150 reviews" => maxReviews 150 (keep businesses with fewer than this)
+- "at least 20 reviews" => minReviews 20
+- "between 20 and 160 reviews" => minReviews 20, maxReviews 161
+- If they do not mention a review floor or cap, both minReviews and maxReviews are null
 - If count is missing, use 50.`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -167,6 +176,6 @@ export async function parseUserRequest(
   }
 
   throw new Error(
-    `Gemini is busy right now (${lastError}). Wait a minute and try again — or keep the request in the form "Find 50 plumbers in Austin, under 150 reviews, with no website".`,
+    `Gemini is busy right now (${lastError}). Wait a minute and try again — or keep the request in the form "Find 25 plumber owners in Houston, TX".`,
   );
 }

@@ -1,3 +1,4 @@
+/** Settings page API. Never return raw secrets — maskSecret() only. */
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getConfig, saveSettings, configStatus, maskSecret, SETTING_KEYS, type SettingKey } from "@/shared/settings";

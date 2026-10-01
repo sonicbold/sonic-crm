@@ -1,19 +1,32 @@
 /**
  * Shared AI request pool for Finder enrichment.
  *
- * Groq free-tier defaults (openai/gpt-oss-20b, docs.groq.com/docs/rate-limits):
- *   30 RPM, 1,000 RPD per key.
- * OpenRouter free-model defaults:
- *   20 RPM, 50 RPD (higher if the account has credits).
+ * Groq GPT-OSS 120B defaults: 30 RPM, 1,000 RPD per key.
+ * Three Groq keys are three independent slots. Override with FINDER_* env vars.
  *
- * Override with FINDER_GROQ_RPM, FINDER_GROQ_RPD, FINDER_OPENROUTER_RPM,
- * FINDER_OPENROUTER_RPD, FINDER_AI_MIN_DELAY_MS.
+ * Override with FINDER_GROQ_RPM, FINDER_GROQ_RPD, FINDER_GEMINI_RPM,
+ * FINDER_GEMINI_RPD, FINDER_OPENROUTER_RPM, FINDER_OPENROUTER_RPD,
+ * FINDER_AI_MIN_DELAY_MS.
  */
+
+export type AiUsage = {
+  promptTokens: number;
+  completionTokens: number;
+};
 
 export type AiCompleteCall = {
   system: string;
   user: string;
   json?: boolean;
+  jsonSchema?: Record<string, unknown>;
+  /** Groq model id. Finder name detection uses openai/gpt-oss-120b. */
+  model?: string;
+};
+
+export type AiCompleteResult = {
+  text: string;
+  provider: string;
+  usage?: AiUsage;
 };
 
 export type AiPoolStatus = {
@@ -24,16 +37,20 @@ export type AiPoolStatus = {
 export type AiProviderConfig = {
   id: string;
   label: string;
-  family: "groq" | "openrouter";
+  family: "gemini" | "groq" | "openrouter";
   rpm: number;
   rpd: number;
-  complete: (call: AiCompleteCall) => Promise<string>;
+  /** In-flight requests allowed on this key. Default 1. */
+  maxConcurrent?: number;
+  complete: (call: AiCompleteCall) => Promise<string | { text: string; usage?: AiUsage }>;
 };
 
 export type AiPoolLimits = {
   minDelayMs: number;
   groqRpm: number;
   groqRpd: number;
+  geminiRpm: number;
+  geminiRpd: number;
   openrouterRpm: number;
   openrouterRpd: number;
 };
@@ -68,11 +85,13 @@ function envInt(name: string, fallback: number): number {
 
 export function loadAiPoolLimits(): AiPoolLimits {
   return {
-    minDelayMs: envInt("FINDER_AI_MIN_DELAY_MS", 400),
+    minDelayMs: envInt("FINDER_AI_MIN_DELAY_MS", 0),
     groqRpm: envInt("FINDER_GROQ_RPM", 30),
     groqRpd: envInt("FINDER_GROQ_RPD", 1000),
-    openrouterRpm: envInt("FINDER_OPENROUTER_RPM", 20),
-    openrouterRpd: envInt("FINDER_OPENROUTER_RPD", 50),
+    geminiRpm: envInt("FINDER_GEMINI_RPM", 10),
+    geminiRpd: envInt("FINDER_GEMINI_RPD", 250),
+    openrouterRpm: envInt("FINDER_OPENROUTER_RPM", 10_000),
+    openrouterRpd: envInt("FINDER_OPENROUTER_RPD", 1_000_000),
   };
 }
 
@@ -130,8 +149,29 @@ export function isDailyLimitMessage(message: string): boolean {
   );
 }
 
+/** Gemini 503s and similar outages should move the call to the next key. */
+export function isTransientProviderError(err: unknown): boolean {
+  const status = errorStatus(err);
+  if (status === 500 || status === 502 || status === 503 || status === 504) return true;
+  const msg = errorMessage(err).toLowerCase();
+  return (
+    /\bfailed \(50[0234]\)/.test(msg) ||
+    msg.includes("high demand") ||
+    msg.includes("unavailable") ||
+    msg.includes("overloaded") ||
+    msg.includes("try again later")
+  );
+}
+
+export function isRequestTooLarge(err: unknown): boolean {
+  if (errorStatus(err) === 413) return true;
+  const msg = errorMessage(err).toLowerCase();
+  return msg.includes("request too large") || (msg.includes("413") && msg.includes("tpm"));
+}
+
 export function isRateLimitError(err: unknown): boolean {
   if (err instanceof RateLimitError) return true;
+  if (isRequestTooLarge(err)) return false;
   if (errorStatus(err) === 429) return true;
   const msg = errorMessage(err).toLowerCase();
   return (
@@ -190,16 +230,20 @@ type Slot = AiProviderConfig & {
   dailyResetAt: number;
   pausedUntil: number;
   lastStartAt: number;
+  maxConcurrent: number;
 };
 
 type Job = {
   call: AiCompleteCall;
-  resolve: (value: { text: string; provider: string }) => void;
+  attempts: number;
+  resolve: (value: AiCompleteResult) => void;
   reject: (err: unknown) => void;
 };
 
 const MINUTE_MS = 60_000;
 const DAILY_WAIT_GIVE_UP_MS = 5 * 60_000;
+/** RPM 429s used to retry forever and stall Canvass with 0 saved leads. */
+const MAX_JOB_ATTEMPTS = 4;
 
 function defaultSleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -213,13 +257,13 @@ export class AiRequestPool {
   private readonly onStatus?: (status: AiPoolStatus) => void;
   private getRemainingLeads: () => number;
   private readonly queue: Job[] = [];
-  private readonly busy = new Set<string>();
+  private readonly inFlight = new Map<string, number>();
   private looping = false;
   private stopped = false;
 
   constructor(opts: AiPoolOptions) {
     if (!opts.providers.length) {
-      throw new Error("No Groq or OpenRouter key is configured.");
+      throw new Error("No Gemini, Groq, or OpenRouter key is configured.");
     }
     const now = opts.now ?? Date.now;
     this.now = now;
@@ -231,6 +275,7 @@ export class AiRequestPool {
       ...p,
       rpm: Math.max(1, p.rpm),
       rpd: Math.max(1, p.rpd),
+      maxConcurrent: Math.max(1, p.maxConcurrent ?? 1),
       starts: [],
       dailyCount: 0,
       dailyResetAt: nextUtcMidnight(now()),
@@ -265,10 +310,10 @@ export class AiRequestPool {
     }));
   }
 
-  async complete(call: AiCompleteCall): Promise<{ text: string; provider: string }> {
+  async complete(call: AiCompleteCall): Promise<AiCompleteResult> {
     if (this.stopped) throw new Error("AI request pool has been stopped.");
     return new Promise((resolve, reject) => {
-      this.queue.push({ call, resolve, reject });
+      this.queue.push({ call, attempts: 0, resolve, reject });
       void this.loop();
     });
   }
@@ -290,8 +335,18 @@ export class AiRequestPool {
     return Math.max(0, slot.rpm - this.rpmUsed(slot, now));
   }
 
+  private flying(id: string): number {
+    return this.inFlight.get(id) ?? 0;
+  }
+
+  private flyingTotal(): number {
+    let n = 0;
+    for (const count of this.inFlight.values()) n += count;
+    return n;
+  }
+
   private isReady(slot: Slot, now: number): boolean {
-    if (this.busy.has(slot.id)) return false;
+    if (this.flying(slot.id) >= slot.maxConcurrent) return false;
     if (slot.pausedUntil > now) return false;
     if (this.rpdUsed(slot, now) >= slot.rpd) return false;
     if (this.rpmUsed(slot, now) >= slot.rpm) return false;
@@ -301,14 +356,19 @@ export class AiRequestPool {
   private pickReady(now: number): Slot | null {
     const ready = this.slots.filter((s) => this.isReady(s, now));
     if (!ready.length) return null;
+    const familyRank = { gemini: 0, groq: 1, openrouter: 2 };
     ready.sort((a, b) => {
-      if (a.family !== b.family) return a.family === "groq" ? -1 : 1;
+      if (a.family !== b.family) return familyRank[a.family] - familyRank[b.family];
       return this.remainingRpm(b, now) - this.remainingRpm(a, now);
     });
     return ready[0];
   }
 
   private delayFor(slot: Slot, now: number): number {
+    if (slot.rpm >= 1_000) {
+      const sinceLast = slot.lastStartAt ? now - slot.lastStartAt : this.minDelayMs;
+      return Math.max(0, this.minDelayMs - sinceLast);
+    }
     const providers = this.slots.map((s) => ({
       rpm: s.rpm,
       usedInWindow: this.rpmUsed(s, now),
@@ -328,7 +388,7 @@ export class AiRequestPool {
   private msUntilNextReady(now: number): number {
     let wait = MINUTE_MS;
     for (const slot of this.slots) {
-      if (this.busy.has(slot.id)) continue;
+      if (this.flying(slot.id) >= slot.maxConcurrent) continue;
       if (this.rpdUsed(slot, now) >= slot.rpd) {
         wait = Math.min(wait, Math.max(250, slot.dailyResetAt - now));
         continue;
@@ -370,7 +430,7 @@ export class AiRequestPool {
     if (this.looping) return;
     this.looping = true;
     try {
-      while (!this.stopped && (this.queue.length > 0 || this.busy.size > 0)) {
+      while (!this.stopped && (this.queue.length > 0 || this.flyingTotal() > 0)) {
         const now = this.now();
         if (this.queue.length > 0 && this.allDailyLimited(now)) {
           const wait = Math.min(...this.slots.map((s) => s.dailyResetAt - now));
@@ -386,7 +446,7 @@ export class AiRequestPool {
         const slot = this.pickReady(now);
         if (slot && this.queue.length > 0) {
           const job = this.queue.shift()!;
-          this.busy.add(slot.id);
+          this.inFlight.set(slot.id, this.flying(slot.id) + 1);
           void this.run(slot, job);
           continue;
         }
@@ -399,7 +459,7 @@ export class AiRequestPool {
           continue;
         }
 
-        if (this.busy.size > 0) {
+        if (this.flyingTotal() > 0) {
           await this.sleep(50);
         }
       }
@@ -421,19 +481,31 @@ export class AiRequestPool {
       slot.lastStartAt = started;
       slot.starts.push(started);
       slot.dailyCount += 1;
-      const text = await slot.complete(job.call);
-      job.resolve({ text, provider: slot.label });
+      const raw = await slot.complete(job.call);
+      const text = typeof raw === "string" ? raw : raw.text;
+      const usage = typeof raw === "string" ? undefined : raw.usage;
+      job.resolve({ text, provider: slot.label, usage });
     } catch (err) {
       if (isRateLimitError(err)) {
         const rateErr = toRateLimitError(err, slot.label);
-        this.pause(slot, rateErr, this.now());
+        job.attempts += 1;
+        if (job.attempts >= MAX_JOB_ATTEMPTS) {
+          job.reject(rateErr);
+        } else {
+          this.pause(slot, rateErr, this.now());
+          this.queue.unshift(job);
+          this.emit(`paused ${slot.label}`, rateErr.retryAfterMs);
+        }
+      } else if (isTransientProviderError(err) && job.attempts < Math.max(this.slots.length, MAX_JOB_ATTEMPTS - 1)) {
+        job.attempts += 1;
+        this.pause(slot, new RateLimitError(`${slot.label} is unavailable`, { retryAfterMs: 20_000 }), this.now());
         this.queue.unshift(job);
-        this.emit(`paused ${slot.label}`, rateErr.retryAfterMs);
+        this.emit(`retry after ${slot.label}`, 20_000);
       } else {
         job.reject(err);
       }
     } finally {
-      this.busy.delete(slot.id);
+      this.inFlight.set(slot.id, Math.max(0, this.flying(slot.id) - 1));
     }
   }
 }

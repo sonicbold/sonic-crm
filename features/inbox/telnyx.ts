@@ -1,3 +1,4 @@
+/** Telnyx send + webhook signature. Keys come from shared/settings getConfig(), not process.env alone. */
 import { createPublicKey, verify } from "crypto";
 import { getConfig } from "@/shared/settings";
 

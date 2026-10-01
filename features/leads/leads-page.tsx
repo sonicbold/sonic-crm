@@ -14,7 +14,7 @@ export default function LeadsPage() {
   const [importing, setImporting] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [form, setForm] = useState({ name: "", phone: "", businessName: "", city: "", email: "" });
+  const [form, setForm] = useState({ name: "", phone: "", businessName: "", city: "", email: "", website: "" });
   const [saving, setSaving] = useState(false);
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -68,7 +68,7 @@ export default function LeadsPage() {
     setSaving(false);
     if (!res.ok) { toast({ title: "Error", description: data.error || "Failed", variant: "destructive" }); return; }
     toast({ title: "Lead added!" });
-    setAddOpen(false); setForm({ name: "", phone: "", businessName: "", city: "", email: "" });
+    setAddOpen(false); setForm({ name: "", phone: "", businessName: "", city: "", email: "", website: "" });
     setRefreshKey(k => k + 1);
   }
 
@@ -104,6 +104,7 @@ export default function LeadsPage() {
             <div className="space-y-2"><Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Phone <span className="text-destructive">*</span></Label><Input className="bg-background border-border rounded-xl h-10" placeholder="+1 555 000 0000" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
             <div className="space-y-2"><Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">City</Label><Input className="bg-background border-border rounded-xl h-10" placeholder="Houston, TX" value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} /></div>
             <div className="space-y-2"><Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Email</Label><Input type="email" className="bg-background border-border rounded-xl h-10" placeholder="mike@mikeplumbing.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
+            <div className="space-y-2"><Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Website</Label><Input className="bg-background border-border rounded-xl h-10" placeholder="joesplumbing.com" value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" className="rounded-xl border-border" onClick={() => setAddOpen(false)}>Cancel</Button>

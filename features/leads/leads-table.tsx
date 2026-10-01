@@ -4,9 +4,12 @@ import { StatusChip } from "@/shared/layout/status-chip";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
-import { formatPhone, timeAgo, businessLink } from "@/shared/utils";
-import { Search, Send, Trash2, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { formatPhone, timeAgo, businessLink, toHttpUrl } from "@/shared/utils";
+import { WebsiteStatusBadge } from "@/features/leads/website-status-badge";
+import { Search, Send, Trash2, ChevronLeft, ChevronRight, ExternalLink, Pencil } from "lucide-react";
 import { toast } from "@/shared/ui/use-toast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/shared/ui/dialog";
+import { Label } from "@/shared/ui/label";
 
 interface Lead {
   id: string;
@@ -20,7 +23,11 @@ interface Lead {
   rating: number | null;
   reviewCount: number | null;
   website: string | null;
+  websiteStatus?: string | null;
   googleMapsUrl: string | null;
+  address?: string | null;
+  state?: string | null;
+  notes?: string | null;
   createdAt: string;
   source: string;
 }
@@ -64,6 +71,126 @@ function SendSMSModal({ lead, onClose }: SendModalProps) {
   );
 }
 
+function EditLeadModal({ lead, onClose, onSaved }: { lead: Lead; onClose: () => void; onSaved: (lead: Lead) => void }) {
+  const [form, setForm] = useState({
+    businessName: lead.businessName || "",
+    name: lead.name || "",
+    phone: lead.phone || "",
+    email: lead.email || "",
+    city: lead.city || "",
+    state: lead.state || "",
+    address: lead.address || "",
+    website: lead.website || "",
+    googleMapsUrl: lead.googleMapsUrl || "",
+    status: lead.status || "new",
+  });
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (!form.phone.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/leads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: lead.id,
+          businessName: form.businessName.trim() || null,
+          name: form.name.trim() || null,
+          phone: form.phone.trim(),
+          email: form.email.trim() || null,
+          city: form.city.trim() || null,
+          state: form.state.trim() || null,
+          address: form.address.trim() || null,
+          website: form.website.trim() || null,
+          status: form.status,
+          googleMapsUrl: form.googleMapsUrl.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not save");
+      toast({ title: "Lead updated" });
+      onSaved(data);
+      onClose();
+    } catch (err: unknown) {
+      toast({ title: "Save failed", description: err instanceof Error ? err.message : "Could not save", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-lg rounded-2xl bg-card border-border max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-heading text-xl">Edit lead</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Business name</Label>
+            <Input className="bg-background border-border rounded-xl h-10" value={form.businessName} onChange={(e) => setForm((f) => ({ ...f, businessName: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Contact name</Label>
+            <Input className="bg-background border-border rounded-xl h-10" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Phone</Label>
+              <Input className="bg-background border-border rounded-xl h-10" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Email</Label>
+              <Input className="bg-background border-border rounded-xl h-10" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">City</Label>
+              <Input className="bg-background border-border rounded-xl h-10" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">State</Label>
+              <Input className="bg-background border-border rounded-xl h-10" value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Address</Label>
+            <Input className="bg-background border-border rounded-xl h-10" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Website</Label>
+            <Input className="bg-background border-border rounded-xl h-10" value={form.website} onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Google Maps / GBP</Label>
+            <Input className="bg-background border-border rounded-xl h-10" value={form.googleMapsUrl} onChange={(e) => setForm((f) => ({ ...f, googleMapsUrl: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase tracking-wider font-mono text-muted-foreground">Stage</Label>
+            <Select value={form.status} onValueChange={(v) => setForm((f) => ({ ...f, status: v }))}>
+              <SelectTrigger className="h-10 rounded-xl bg-background border-border"><SelectValue /></SelectTrigger>
+              <SelectContent className="rounded-xl border-border">
+                <SelectItem value="new">New</SelectItem>
+                <SelectItem value="contacted">Contacted</SelectItem>
+                <SelectItem value="interested">Interested</SelectItem>
+                <SelectItem value="not_interested">Not interested</SelectItem>
+                <SelectItem value="closed">Closed</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="rounded-xl border-border" onClick={onClose}>Cancel</Button>
+          <Button className="rounded-xl bg-copper hover:bg-copper-hover text-white" onClick={save} disabled={!form.phone.trim() || saving}>
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function SourceBadge({ source }: { source: string }) {
   if (source === "ai_scraper" || source === "finder") {
     return <span className="inline-flex items-center gap-1 text-[10px] font-mono tracking-tight font-semibold px-2 py-0.5 rounded-full bg-lavender-soft text-lavender-text border border-lavender-border">Finder</span>;
@@ -80,10 +207,13 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [website, setWebsite] = useState("any");
   const [source, setSource] = useState("all");
   const [loading, setLoading] = useState(true);
   const [sendTo, setSendTo] = useState<Lead | null>(null);
+  const [editLead, setEditLead] = useState<Lead | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,6 +222,7 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
       limit: "50",
       status,
       source,
+      website,
       ...(search ? { search } : {}),
     });
     const res = await fetch(`/api/leads?${params}`);
@@ -99,20 +230,54 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
     setLeads(data.data || []);
     setTotal(data.total || 0);
     setLoading(false);
-  }, [page, search, status, source]);
+  }, [page, search, status, source, website]);
 
   useEffect(() => { load(); }, [load]);
 
   async function deleteLead(id: string) {
     if (!confirm("Delete this lead?")) return;
-    await fetch(`/api/leads?id=${id}`, { method: "DELETE" });
-    load();
+    const res = await fetch(`/api/leads?id=${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast({ title: "Delete failed", description: data.error || "Could not delete lead", variant: "destructive" });
+      return;
+    }
+    setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
+    setLeads(prev => prev.filter(l => l.id !== id));
+    setTotal(t => Math.max(0, t - 1));
+  }
+
+  async function deleteSelected() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    const label = ids.length === 1 ? "Delete 1 selected lead?" : `Delete ${ids.length} selected leads?`;
+    if (!confirm(label)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/leads", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not delete leads");
+      const removed = new Set(ids);
+      setLeads(prev => prev.filter(l => !removed.has(l.id)));
+      setTotal(t => Math.max(0, t - (data.deleted ?? ids.length)));
+      setSelected(new Set());
+      toast({ title: `Deleted ${data.deleted ?? ids.length} lead${(data.deleted ?? ids.length) === 1 ? "" : "s"}` });
+    } catch (err: unknown) {
+      toast({ title: "Delete failed", description: err instanceof Error ? err.message : "Could not delete", variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function toggleSelect(id: string) {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
+  const allOnPageSelected = leads.length > 0 && leads.every(l => selected.has(l.id));
   const pages = Math.ceil(total / 50);
 
   return (
@@ -136,6 +301,29 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
           </SelectContent>
         </Select>
 
+        <Select value={website} onValueChange={v => { setWebsite(v); setPage(1); }}>
+          <SelectTrigger className="w-44 h-10 rounded-xl bg-background border-border"><SelectValue placeholder="Website" /></SelectTrigger>
+          <SelectContent className="rounded-xl border-border">
+            <SelectItem value="any">All websites</SelectItem>
+            <SelectItem value="with">Has Website</SelectItem>
+            <SelectItem value="without">No Website</SelectItem>
+            <SelectItem value="uncertain">Uncertain</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {selected.size > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-10 rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive font-semibold"
+            onClick={deleteSelected}
+            disabled={deleting}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            {deleting ? "Deleting..." : `Delete selected (${selected.size})`}
+          </Button>
+        )}
+
         <span className="text-[11px] font-mono text-muted-foreground ml-auto uppercase tracking-widest font-semibold">{total} records</span>
       </div>
 
@@ -144,9 +332,18 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-background/50 text-[11px] font-mono uppercase tracking-widest text-muted-foreground font-semibold">
-              <th className="w-10 px-4 py-3"><input type="checkbox" className="rounded border-border" onChange={e => setSelected(e.target.checked ? new Set(leads.map(l => l.id)) : new Set())} /></th>
+              <th className="w-10 px-4 py-3">
+                <input
+                  type="checkbox"
+                  className="rounded border-border"
+                  checked={allOnPageSelected}
+                  onChange={e => setSelected(e.target.checked ? new Set(leads.map(l => l.id)) : new Set())}
+                  aria-label="Select all on this page"
+                />
+              </th>
               <th className="px-4 py-3 text-left">Company</th>
-              <th className="px-4 py-3 text-left">Link</th>
+              <th className="px-4 py-3 text-left">Website</th>
+              <th className="px-4 py-3 text-left">GBP</th>
               <th className="px-4 py-3 text-left">Contact</th>
               <th className="px-4 py-3 text-left">Phone & Email</th>
               <th className="px-4 py-3 text-left">Source</th>
@@ -159,15 +356,18 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
             {loading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i} className="border-b border-border/50">
-                  {Array.from({ length: 9 }).map((_, j) => (
+                  {Array.from({ length: 10 }).map((_, j) => (
                     <td key={j} className="px-4 py-4"><div className="h-4 bg-muted animate-pulse rounded-md" /></td>
                   ))}
                 </tr>
               ))
             ) : leads.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-16 text-center text-muted-foreground font-sans">No leads yet. Import a CSV or run the scraper.</td></tr>
+              <tr><td colSpan={10} className="px-4 py-16 text-center text-muted-foreground font-sans">No leads yet. Import a CSV or run the scraper.</td></tr>
             ) : (
-              leads.map(lead => (
+              leads.map(lead => {
+                const site = lead.websiteStatus === "has_website" ? businessLink({ website: lead.website }) : null;
+                const gbp = toHttpUrl(lead.googleMapsUrl);
+                return (
                 <tr key={lead.id} className={`border-b border-border/50 hover:bg-muted/40 transition-colors ${selected.has(lead.id) ? "bg-teal-bright/5" : ""}`}>
                   <td className="px-4 py-3"><input type="checkbox" className="rounded border-border" checked={selected.has(lead.id)} onChange={() => toggleSelect(lead.id)} /></td>
                   <td className="px-4 py-3">
@@ -175,22 +375,39 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
                     <p className="text-xs font-sans text-muted-foreground truncate">{lead.city}</p>
                   </td>
                   <td className="px-4 py-3">
-                    {(() => {
-                      const link = businessLink({ website: lead.website, googleMapsUrl: lead.googleMapsUrl });
-                      if (!link) return <span className="text-xs text-muted-foreground">—</span>;
-                      return (
+                    <div className="flex flex-col items-start gap-1 max-w-[180px]">
+                      <WebsiteStatusBadge status={lead.websiteStatus} />
+                      {site ? (
                         <a
-                          href={link.href}
+                          href={site.href}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-copper hover:underline max-w-[160px]"
-                          title={link.href}
+                          className="inline-flex items-center gap-1 text-xs text-copper hover:underline max-w-full"
+                          title={site.href}
                         >
                           <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate">{link.label}</span>
+                          <span className="truncate">{site.label}</span>
                         </a>
-                      );
-                    })()}
+                      ) : lead.websiteStatus === "uncertain" && lead.website ? (
+                        <span className="text-[10px] text-muted-foreground truncate max-w-full" title={lead.website}>{lead.website}</span>
+                      ) : null}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {gbp ? (
+                      <a
+                        href={gbp}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-copper hover:underline"
+                        title={gbp}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                        GBP
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 font-sans font-medium text-foreground">{lead.name || "—"}</td>
                   <td className="px-4 py-3">
@@ -204,12 +421,13 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors" title="Edit" onClick={() => setEditLead(lead)}><Pencil className="h-4 w-4" /></Button>
                       <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-teal-bright hover:bg-teal-bright/10 rounded-lg transition-colors" title="Send SMS" onClick={() => setSendTo(lead)}><Send className="h-4 w-4" /></Button>
                       <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors" title="Delete" onClick={() => deleteLead(lead.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </td>
                 </tr>
-              ))
+              );})
             )}
           </tbody>
         </table>
@@ -233,6 +451,13 @@ export function LeadsTable({ onEnroll }: { onEnroll?: (lead: Lead) => void }) {
       )}
 
       {sendTo && <SendSMSModal lead={sendTo} onClose={() => setSendTo(null)} />}
+      {editLead && (
+        <EditLeadModal
+          lead={editLead}
+          onClose={() => setEditLead(null)}
+          onSaved={(updated) => setLeads((prev) => prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)))}
+        />
+      )}
     </div>
   );
 }

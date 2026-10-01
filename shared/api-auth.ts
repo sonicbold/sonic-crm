@@ -26,14 +26,14 @@ export async function requireAgentKey(req: Request) {
   const cfg = await getConfig();
   if (!cfg.CRM_API_KEY) {
     return NextResponse.json(
-      { error: "No CRM API key yet. Open Settings and click Generate agent API key." },
+      { error: "No CRM API key yet. Open Settings and click Generate agent API key.", feature: "agent" },
       { status: 503 }
     );
   }
   const provided = readApiKey(req);
   if (!provided || !keysEqual(provided, cfg.CRM_API_KEY)) {
     return NextResponse.json(
-      { error: "Invalid or missing API key. Send Authorization: Bearer <key> or X-API-Key." },
+      { error: "Invalid or missing API key. Send Authorization: Bearer <key> or X-API-Key.", feature: "agent" },
       { status: 401 }
     );
   }

@@ -1,0 +1,22 @@
+---
+description: Canvass goal for the plumber Maps lead finder. Read before changing search, filters, dedupe, or Apify cost.
+globs: features/finder/**,app/api/scraper/**
+alwaysApply: false
+---
+
+# Canvass
+
+Canvass (`features/finder/canvass.ts`) builds an SMS list of independent US plumbing shops for a website, SEO, or AI receptionist offer.
+
+Before changing Maps search, filters, phone handling, or Apify usage:
+
+- Read `CANVASS` in `features/finder/canvass.ts` and keep that goal true.
+- Volume comes from new cities, not extra queries in a city already searched.
+- Keep one deep Maps pull per city. Add the follow-up query only when that city is still short.
+- Reuse a saved `MapSearch` instead of paying Apify again.
+- Do not scrape reviews for every lead. Maps already has phone, website, rating, and review count. When Maps does not list a real owner person, pull reviews once: Groq summarizes them and keeps the personal name that appears more than once, spreading calls across both Groq keys by rate limit. Never parse the shop title for an owner. Real Maps-listed owners keep the Maps stats note and are not scraped.
+- Dedupe by the last 10 phone digits, against the current run and the CRM.
+- Drop toll-free numbers (800, 833, 844, 855, 866, 877, 888).
+- Keep the review band, star floor, chain filter, and supplier filter.
+
+Do not add area slices or extra trade queries just to raise the lead count.

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { jsonError } from "@/shared/route";
 
 export const runtime = "nodejs";
 
@@ -8,7 +9,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const file = searchParams.get("file") ?? "";
   if (!file || file.includes("..") || file.includes("/") || file.includes("\\")) {
-    return NextResponse.json({ error: "Invalid file" }, { status: 400 });
+    return jsonError("finder.export", "Invalid file", 400);
   }
 
   const full = path.join(process.cwd(), "data", "exports", file);
@@ -21,6 +22,6 @@ export async function GET(request: Request) {
       },
     });
   } catch {
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
+    return jsonError("finder.export", "File not found", 404);
   }
 }

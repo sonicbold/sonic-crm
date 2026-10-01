@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Lead } from "./types";
+import { costSummaryCsv, type CanvassCost, type CanvassSpend } from "./spend";
 
 export function cell(value: string): string {
   const v = value.replace(/\r?\n/g, " ").trim();
@@ -103,11 +104,15 @@ export function crmLeadsToCsv(leads: CrmLeadCsvRow[]): string {
   return [header.join(","), ...rows].join("\n");
 }
 
-export async function saveCsv(leads: Lead[]): Promise<string> {
+export async function saveCsv(
+  leads: Lead[],
+  extra?: { spend: CanvassSpend; cost: CanvassCost },
+): Promise<string> {
   const dir = path.join(process.cwd(), "data", "exports");
   await mkdir(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `leads-${stamp}.csv`;
-  await writeFile(path.join(dir, filename), leadsToCsv(leads), "utf8");
+  const body = extra ? `${leadsToCsv(leads)}\n\n${costSummaryCsv(extra.spend, extra.cost)}` : leadsToCsv(leads);
+  await writeFile(path.join(dir, filename), body, "utf8");
   return filename;
 }

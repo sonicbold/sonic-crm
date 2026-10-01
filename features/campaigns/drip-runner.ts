@@ -9,6 +9,7 @@ import {
   describePlan,
   formatInZone,
 } from "@/features/campaigns/drip-schedule";
+import { logger } from "@/shared/log";
 
 const PENDING = ["queued", "scheduled"] as const;
 
@@ -123,6 +124,12 @@ export async function processDueSends(limit = 1) {
     const templates = parseCampaignMessages(row.campaign.steps);
     const template = templates[row.variant] || templates[0];
     if (!template || !row.lead.phone) {
+      logger("campaigns.drip").warn("skip send", {
+        campaignId: row.campaignId,
+        campaignLeadId: row.id,
+        leadId: row.leadId,
+        reason: "missing_phone_or_message",
+      });
       await prisma.campaignLead.update({
         where: { id: row.id },
         data: { status: "failed", lastError: "Missing phone or campaign message" },
@@ -153,6 +160,12 @@ export async function processDueSends(limit = 1) {
       sent++;
     } catch (err) {
       const lastError = err instanceof Error ? err.message : "SMS failed";
+      logger("campaigns.drip").error("send failed", {
+        err,
+        campaignId: row.campaignId,
+        campaignLeadId: row.id,
+        leadId: row.leadId,
+      });
       await prisma.campaignLead.update({
         where: { id: row.id },
         data: { status: "failed", lastError },

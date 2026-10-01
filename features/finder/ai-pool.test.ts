@@ -7,6 +7,8 @@ import {
   nextUtcMidnight,
   parseRetryAfterMs,
   retryAfterFromMessage,
+  isRateLimitError,
+  isRequestTooLarge,
 } from "./ai-pool";
 
 function delayedResolve(value: string, ms = 0) {
@@ -25,6 +27,12 @@ test("parseRetryAfterMs treats small numbers as seconds", () => {
 test("retryAfterFromMessage reads Groq-style copy", () => {
   assert.equal(retryAfterFromMessage("Please try again in 2.5s"), 2500);
   assert.equal(retryAfterFromMessage("try again in 1m"), 60_000);
+});
+
+test("a Groq 413 request-too-large is not treated as a retryable 429", () => {
+  const err = Object.assign(new Error('413 {"error":{"message":"Request too large for model TPM"}}'), { status: 413 });
+  assert.equal(isRequestTooLarge(err), true);
+  assert.equal(isRateLimitError(err), false);
 });
 
 test("nextUtcMidnight is the following UTC day", () => {
@@ -143,4 +151,36 @@ test("pool reports the active provider on status callbacks", async () => {
   await pool.complete({ system: "s", user: "u" });
   pool.stop();
   assert.ok(seen.some((label) => label.includes("OpenRouter")));
+});
+
+test("a 429 does not retry the same job forever", async () => {
+  let now = 1_000_000;
+  let calls = 0;
+  const pool = new AiRequestPool({
+    minDelayMs: 0,
+    now: () => now,
+    sleep: async (ms) => {
+      now += Math.max(ms, 1);
+    },
+    providers: [
+      {
+        id: "groq-1",
+        label: "Groq Key 1",
+        family: "groq",
+        rpm: 30,
+        rpd: 1000,
+        complete: async () => {
+          calls += 1;
+          throw new RateLimitError("rpm", { retryAfterMs: 1_000 });
+        },
+      },
+    ],
+  });
+  await assert.rejects(
+    () => pool.complete({ system: "s", user: "u" }),
+    /rpm|rate limit/i,
+  );
+  pool.stop();
+  assert.ok(calls <= 4, `expected at most 4 attempts, got ${calls}`);
+  assert.ok(calls >= 2, `expected more than one attempt, got ${calls}`);
 });
